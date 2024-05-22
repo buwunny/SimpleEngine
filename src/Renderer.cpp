@@ -1,13 +1,7 @@
 #include "../include/Renderer.hpp"
-#include "../include/Shader.hpp"
-#include "../include/Window.hpp"
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 
-Renderer::Renderer(Window& window, Shader& shader) : window(window), shader(shader) {
+
+Renderer::Renderer(Window& window, Shader& shader, Camera& camera) : window(window), shader(shader), camera(camera) {
     // Set up vertex data and buffers and configure vertex attributes
     float vertices[] = {
         -0.5f, -0.5f, -0.5f,
@@ -58,8 +52,8 @@ void Renderer::render() {
     glm::mat4 view = glm::mat4(1.0f);
     glm::mat4 projection = glm::mat4(1.0f);
     model = glm::rotate(model, (float)glfwGetTime(), glm::vec3(0.5f, 1.0f, 0.0f));
-    view = glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
-    projection = glm::perspective(glm::radians(45.0f), (float)window.getWidth() / (float)window.getHeight(), 0.1f, 100.0f);
+    view = camera.getViewMatrix();//glm::translate(view, glm::vec3(0.0f, 0.0f, -3.0f));
+    projection = camera.getProjectionMatrix();//glm::perspective(glm::radians(45.0f), (float)window.getWidth() / (float)window.getHeight(), 0.1f, 100.0f);
 
     // Get matrix's uniform location and set matrix
     shader.setModelMatrix(model);
@@ -70,6 +64,4 @@ void Renderer::render() {
     glBindVertexArray(VAO);
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
 
-    // Swap the screen buffers
-    window.swapBuffers();
 }

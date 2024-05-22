@@ -12,8 +12,10 @@ public:
 
     bool shouldClose() const;
     void swapBuffers() const;
-    int getWidth() const;
-    int getHeight() const;
+    int getWidth();
+    int getHeight();
+    void getCursorPosition(double& xpos, double& ypos);
+    bool isKeyPressed(int key) const;
 
 private:
     GLFWwindow* window;
