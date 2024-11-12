@@ -10,11 +10,7 @@ public:
     InputHandler(Window& window, Camera& camera);
 
     void update();
-
-    bool isKeyPressed(int key) const;
-    bool isMouseButtonPressed(int button) const;
-    void getMousePosition(double& xPos, double& yPos) const;
-
+    
 private:
     Window& window;
     Camera& camera;

@@ -15,6 +15,9 @@ void InputHandler::update() {
     // WASD Movement
     float movementSpeed = 5.0f;
     glm::vec3 movement(0.0f);
+    if (window.isKeyPressed(GLFW_KEY_LEFT_CONTROL)) {
+        movementSpeed = movementSpeed / 4;
+    }
     if (window.isKeyPressed(GLFW_KEY_W)) {
         movement += camera.getFront() * static_cast<float>(deltaTime) * movementSpeed;
     }
