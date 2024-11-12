@@ -1,10 +1,23 @@
 cmake_minimum_required(VERSION 3.10)
-project(MyProject)
+project(OpenGLProject)
 
-add_executable(MyExecutable 
-    ../src/main.cpp
-    ../src/Shader.cpp
-    ../src/Window.cpp
-    ../src/Renderer.cpp
-    ../src/InputHandler.cpp
-    ../src/Camera.cpp)
+set(CMAKE_CXX_STANDARD 11)
+
+set(SOURCES
+    src/main.cpp
+    src/Window.cpp
+    src/Shader.cpp
+    src/Renderer.cpp
+    src/InputHandler.cpp
+    src/Camera.cpp
+)
+
+add_executable(OpenGLProject ${SOURCES})
+
+set(CMAKE_PREFIX_PATH "C:/msys64/mingw64")
+
+find_package(GLEW REQUIRED)
+find_package(GLFW3 REQUIRED)
+find_package(glm REQUIRED)
+
+target_link_libraries(OpenGLProject PRIVATE GLEW::GLEW glfw glm)
