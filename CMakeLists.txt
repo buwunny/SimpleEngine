@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 11)
 
 set(SOURCES
     src/main.cpp
+    src/Shader.cpp
 )
 
 add_executable(OpenGLProject ${SOURCES})
