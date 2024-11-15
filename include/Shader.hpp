@@ -25,5 +25,4 @@ private:
     unsigned int compileShaders(const char* vertexShaderSource, const char* fragmentShaderSource);
 
 };
-
 #endif // SHADER_HPP

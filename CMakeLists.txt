@@ -7,6 +7,8 @@ set(SOURCES
     src/main.cpp
     src/Shader.cpp
     src/Cube.cpp
+    src/Camera.cpp
+    src/InputHandler.cpp
 )
 
 add_executable(OpenGLProject ${SOURCES})

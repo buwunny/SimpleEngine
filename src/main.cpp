@@ -7,6 +7,8 @@
 
 #include "../include/Shader.hpp"
 #include "../include/Cube.hpp"
+#include "../include/Camera.hpp"
+#include "../include/InputHandler.hpp"
 
 glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
@@ -19,20 +21,6 @@ float pitch = 0.0f;
 float lastX = 400, lastY = 300;
 bool firstMouse = true;
 
-void processInput(GLFWwindow *window)
-{
-    float cameraSpeed = 2.5f * deltaTime;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        cameraPos += cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        cameraPos -= cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
-}
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
@@ -82,9 +70,12 @@ int main()
         glfwTerminate();
         return -1;
     }
+    Camera camera(cameraPos, cameraFront, cameraUp);
+    InputHandler inputHandler(&camera);
 
     glfwMakeContextCurrent(window);
-    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetWindowUserPointer(window, &inputHandler);
+    glfwSetCursorPosCallback(window, inputHandler.mouse_callback);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     if (glewInit() != GLEW_OK)
@@ -107,13 +98,13 @@ int main()
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        processInput(window);
+        inputHandler.processInput(window, deltaTime);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         shader.use();
 
-        glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+        glm::mat4 view = glm::lookAt(camera.getPosition(), camera.getPosition() + camera.getFront(), camera.getUp());
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
         shader.setViewMatrix(view);
         shader.setProjectionMatrix(projection);
