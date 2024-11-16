@@ -3,7 +3,7 @@
 
 #include <GL/glew.h>
 
-class Cube {
+class Cube : public Mesh {
 public:
     Cube(int);
     ~Cube();

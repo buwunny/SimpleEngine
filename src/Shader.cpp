@@ -31,6 +31,9 @@ void Shader::setProjectionMatrix(const glm::mat4& projection) {
     glUniformMatrix4fv(glGetUniformLocation(ID, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 }
 
+void Shader::setFragmentColor(float r, float g, float b, float a) {
+    glUniform4f(glGetUniformLocation(ID, "wireframeColor"), r, g, b, a);
+}
 
 unsigned int Shader::compileShaders(const char* vertexShaderSource, const char* fragmentShaderSource) {
     unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);

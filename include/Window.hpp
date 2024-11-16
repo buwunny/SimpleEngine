@@ -13,6 +13,8 @@ public:
     GLFWwindow* getWindow() { return window; };
     bool shouldClose() { return glfwWindowShouldClose(window); };
     void update();
+    void setPolygonMode(unsigned int mode);
+    void setLineWidth(float width) { glLineWidth(width); };
 private:
     GLFWwindow* window;
 };

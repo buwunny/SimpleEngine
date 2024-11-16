@@ -6,7 +6,8 @@ set(CMAKE_CXX_STANDARD 11)
 set(SOURCES
     src/main.cpp
     src/Shader.cpp
-    src/Cube.cpp
+    src/meshes/Mesh.cpp
+    src/meshes/Cube.cpp
     src/Camera.cpp
     src/InputHandler.cpp
     src/Window.cpp

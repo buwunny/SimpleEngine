@@ -1,4 +1,6 @@
-#include "../include/Cube.hpp"
+#include "../../include/meshes/Mesh.hpp"
+#include "../../include/meshes/Cube.hpp"
+
 Cube::Cube(int size) {
     float halfSize = size / 2.0f;
     float vertices[] = {

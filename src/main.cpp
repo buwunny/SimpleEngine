@@ -1,11 +1,26 @@
+#include <GL/glew.h>
+
 #include "../include/Shader.hpp"
-#include "../include/Cube.hpp"
+#include "../include/meshes/Mesh.hpp"
+#include "../include/meshes/Mesh.hpp"
+#include "../include/meshes/Cube.hpp"
 #include "../include/Camera.hpp"
 #include "../include/InputHandler.hpp"
 #include "../include/Window.hpp"
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
+
+void renderMesh(Mesh& mesh, Window& window, Shader& shader)
+{
+    window.setPolygonMode(GL_FILL);
+    shader.setFragmentColor(0.0f, 0.0f, 0.0f, 1.0f);
+    mesh.render();
+    window.setPolygonMode(GL_LINE);
+    window.setLineWidth(3.0f);
+    shader.setFragmentColor(0.5f, 0.0f, 0.5f, 1.0f);
+    mesh.render();
+}
 
 int main()
 {
@@ -39,11 +54,11 @@ int main()
 
         glm::mat4 model1 = glm::rotate(glm::mat4(1.0f), (float)glfwGetTime(), glm::vec3(0.5f, 1.0f, 0.0f));
         shader.setModelMatrix(model1);
-        cube.render();
+        renderMesh(cube, window, shader);
 
         glm::mat4 model2 = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f));
         shader.setModelMatrix(model2);
-        cube2.render();
+        renderMesh(cube2, window, shader);
 
         window.update();
     }
