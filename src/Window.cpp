@@ -25,6 +25,8 @@ Window::Window(int width, int height, const char* title) {
     }
 
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 }
 
 Window::~Window() {
@@ -34,8 +36,4 @@ Window::~Window() {
 void Window::update() {
     glfwSwapBuffers(window);
     glfwPollEvents();
-}
-
-void Window::setPolygonMode(unsigned int mode) {
-    glPolygonMode(GL_FRONT_AND_BACK, mode);
 }

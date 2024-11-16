@@ -13,7 +13,9 @@ public:
     GLFWwindow* getWindow() { return window; };
     bool shouldClose() { return glfwWindowShouldClose(window); };
     void update();
-    void setPolygonMode(unsigned int mode);
+    void close () { glfwSetWindowShouldClose(window, true); };
+    bool isKeyPressed(int key) { return glfwGetKey(window, key) == GLFW_PRESS; };
+    void setPolygonMode(unsigned int mode) { glPolygonMode(GL_FRONT_AND_BACK, mode); };
     void setLineWidth(float width) { glLineWidth(width); };
 private:
     GLFWwindow* window;

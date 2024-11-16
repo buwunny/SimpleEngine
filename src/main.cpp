@@ -42,7 +42,7 @@ int main()
     Cube cube(1);
     Cube cube2(2);
     Circle circle(10);
-    Plane plane(100, 100, 50);
+    Plane plane(100, 100, 25);
     Shader shader("../shaders/vertex.glsl", "../shaders/fragment.glsl");
 
     while (!window.shouldClose())
@@ -51,7 +51,7 @@ int main()
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        inputHandler.processInput(window.getWindow(), deltaTime);
+        inputHandler.processInput(&window, deltaTime);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 

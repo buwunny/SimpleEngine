@@ -1,6 +1,7 @@
 #include "../include/InputHandler.hpp"
 
 InputHandler::InputHandler(Camera* camera) {
+    movementSpeed = 2.5f;
     lastX = 400;
     lastY = 300;
     firstMouse = true;
@@ -10,21 +11,23 @@ InputHandler::InputHandler(Camera* camera) {
 InputHandler::~InputHandler() {
 }
 
-void InputHandler::processInput(GLFWwindow *window, float deltaTime) {
+void InputHandler::processInput(Window *window, float deltaTime) {
     glm::vec3 cameraPos = camera->getPosition();
     glm::vec3 cameraFront = camera->getFront();
     glm::vec3 cameraUp = camera->getUp();
-    float cameraSpeed = 2.5f * deltaTime;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    float cameraSpeed = movementSpeed * deltaTime;
+    if (window->isKeyPressed(GLFW_KEY_LEFT_SHIFT))
+        cameraSpeed *= 2;
+    if (window->isKeyPressed(GLFW_KEY_W))
         cameraPos += cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    if (window->isKeyPressed(GLFW_KEY_S))
         cameraPos -= cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+    if (window->isKeyPressed(GLFW_KEY_A))
         cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+    if (window->isKeyPressed(GLFW_KEY_D))
         cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
+    if (window->isKeyPressed(GLFW_KEY_ESCAPE))
+        window->close();
     camera->setPosition(cameraPos);
 }
 
