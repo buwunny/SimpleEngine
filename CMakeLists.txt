@@ -9,6 +9,7 @@ set(SOURCES
     src/meshes/Mesh.cpp
     src/meshes/Plane.cpp
     src/meshes/Cube.cpp
+    src/meshes/Circle.cpp
     src/Camera.cpp
     src/InputHandler.cpp
     src/Window.cpp
