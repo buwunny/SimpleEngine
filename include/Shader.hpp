@@ -20,7 +20,7 @@ public:
     void setModelMatrix(const glm::mat4& model);
     void setViewMatrix(const glm::mat4& view);
     void setProjectionMatrix(const glm::mat4& projection);
-    void setFragmentColor(float r, float g, float b, float a);
+    void setFragmentColor(glm::vec4 color);
 private:
     std::string readFile(const std::string path);
     unsigned int compileShaders(const char* vertexShaderSource, const char* fragmentShaderSource);
