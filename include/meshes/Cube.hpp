@@ -1,11 +1,11 @@
 #ifndef CUBE_HPP
 #define CUBE_HPP
 
-#include <GL/glew.h>
+#include "Mesh.hpp"
 
 class Cube : public Mesh {
 public:
-    Cube(int);
+    Cube(int size);
     ~Cube();
 
     void render();

@@ -1,4 +1,3 @@
-#include "../../include/meshes/Mesh.hpp"
 #include "../../include/meshes/Cube.hpp"
 
 Cube::Cube(int size) {

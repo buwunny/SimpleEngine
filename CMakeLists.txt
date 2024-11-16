@@ -7,6 +7,7 @@ set(SOURCES
     src/main.cpp
     src/Shader.cpp
     src/meshes/Mesh.cpp
+    src/meshes/Plane.cpp
     src/meshes/Cube.cpp
     src/Camera.cpp
     src/InputHandler.cpp

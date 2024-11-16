@@ -2,7 +2,7 @@
 
 #include "../include/Shader.hpp"
 #include "../include/meshes/Mesh.hpp"
-#include "../include/meshes/Mesh.hpp"
+#include "../include/meshes/Plane.hpp"
 #include "../include/meshes/Cube.hpp"
 #include "../include/Camera.hpp"
 #include "../include/InputHandler.hpp"
@@ -33,6 +33,7 @@ int main()
 
     Cube cube(1);
     Cube cube2(2);
+    Plane plane(10, 10, 10);
     Shader shader("../shaders/vertex.glsl", "../shaders/fragment.glsl");
 
     while (!window.shouldClose())
@@ -59,6 +60,10 @@ int main()
         glm::mat4 model2 = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f));
         shader.setModelMatrix(model2);
         renderMesh(cube2, window, shader);
+
+        glm::mat4 model3 = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -3.0f, 0.0f));
+        shader.setModelMatrix(model3);
+        renderMesh(plane, window, shader);
 
         window.update();
     }
