@@ -9,7 +9,5 @@ public:
     ~Cube();
 
     void render();
-private:
-    unsigned int VBO, VAO, EBO;
 };
 #endif // CUBE_HPP

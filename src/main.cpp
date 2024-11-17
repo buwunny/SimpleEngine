@@ -14,6 +14,7 @@ float lastFrame = 0.0f;
 
 void renderMeshWireframe(Mesh& mesh, Window& window, Shader& shader, glm::vec4 color)
 {
+    shader.setModelMatrix(mesh.getModel());
     window.setPolygonMode(GL_FILL);
     shader.setFragmentColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
     mesh.render();
@@ -25,6 +26,7 @@ void renderMeshWireframe(Mesh& mesh, Window& window, Shader& shader, glm::vec4 c
 
 void renderMeshFill(Mesh& mesh, Window& window, Shader& shader, glm::vec4 color)
 {
+    shader.setModelMatrix(mesh.getModel());
     window.setPolygonMode(GL_FILL);
     shader.setFragmentColor(color);
     mesh.render();
@@ -62,21 +64,18 @@ int main()
         shader.setViewMatrix(view);
         shader.setProjectionMatrix(projection);
 
-        glm::mat4 model1 = glm::rotate(glm::mat4(1.0f), (float)glfwGetTime(), glm::vec3(0.5f, 1.0f, 0.0f));
-        shader.setModelMatrix(model1);
+        cube.setModel(glm::rotate(glm::mat4(1.0f), (float)glfwGetTime(), glm::vec3(0.5f, 1.0f, 0.0f)));
         renderMeshWireframe(cube, window, shader, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
 
-        glm::mat4 model2 = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f));
-        shader.setModelMatrix(model2);
+        cube2.setModel(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f)));
         renderMeshWireframe(cube2, window, shader, glm::vec4(0.0f, 0.5f, 0.5f, 1.0f));
 
-        glm::mat4 model3 = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
-        shader.setModelMatrix(model3);
+        plane.setModel(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f)));
         renderMeshWireframe(plane, window, shader, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
-
+        
         glm::mat4 model4 = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 10.0f, -50.0f));
         model4 = glm::rotate(model4, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        shader.setModelMatrix(model4);
+        circle.setModel(model4);
         renderMeshFill(circle, window, shader, glm::vec4(1.0f, 0.5f, 0.0f, 1.0f));
 
         window.update();

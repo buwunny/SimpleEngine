@@ -12,9 +12,5 @@ public:
     ~Circle();
 
     void render();
-private:
-    unsigned int VBO, VAO, EBO;
-    std::vector<float> vertices;
-    std::vector<unsigned int> indices;
 };
 #endif // CIRCLE_HPP
