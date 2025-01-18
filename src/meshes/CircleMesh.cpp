@@ -1,6 +1,6 @@
-#include "../../include/meshes/Circle.hpp"
+#include "../../include/meshes/CircleMesh.hpp"
 
-Circle::Circle(int radius) {
+CircleMesh::CircleMesh(int radius) {
     float step = 2 * M_PI / 100;
     vertices.push_back(0.0f);
     vertices.push_back(0.0f);
@@ -36,13 +36,13 @@ Circle::Circle(int radius) {
     glEnableVertexAttribArray(0);
 }
 
-Circle::~Circle() {
+CircleMesh::~CircleMesh() {
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
 }
 
-void Circle::render() {
+void CircleMesh::render() {
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);

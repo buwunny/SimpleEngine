@@ -1,6 +1,6 @@
-#include "../../include/meshes/Cube.hpp"
+#include "../../include/meshes/CubeMesh.hpp"
 
-Cube::Cube(int size) {
+CubeMesh::CubeMesh(int size) {
     float halfSize = size / 2.0f;
     float vertices[] = {
         // positions
@@ -42,13 +42,13 @@ Cube::Cube(int size) {
     glEnableVertexAttribArray(1);
 }
 
-Cube::~Cube() {
+CubeMesh::~CubeMesh() {
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
 }
 
-void Cube::render() {
+void CubeMesh::render() {
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);

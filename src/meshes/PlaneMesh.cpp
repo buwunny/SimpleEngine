@@ -1,6 +1,6 @@
-#include "../../include/meshes/Plane.hpp"
+#include "../../include/meshes/PlaneMesh.hpp"
 
-Plane::Plane(int length, int width, int subdivisions) {
+PlaneMesh::PlaneMesh(int length, int width, int subdivisions) {
     float halfLength = length / 2.0f;
     float halfWidth = width / 2.0f;
     float stepLength = length / static_cast<float>(subdivisions);
@@ -46,13 +46,13 @@ Plane::Plane(int length, int width, int subdivisions) {
     glEnableVertexAttribArray(0);
 }
 
-Plane::~Plane() {
+PlaneMesh::~PlaneMesh() {
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
 }
 
-void Plane::render() {
+void PlaneMesh::render() {
     glBindVertexArray(VAO);
     glDrawElements(GL_QUADS, indices.size(), GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
