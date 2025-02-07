@@ -50,7 +50,9 @@ int main()
         shader.use();
 
         glm::mat4 view = glm::lookAt(playerCamera.getPosition(), playerCamera.getPosition() + playerCamera.getFront(), playerCamera.getUp());
-        glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+        int width, height;
+        glfwGetFramebufferSize(window.getWindow(), &width, &height);
+        glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
         shader.setViewMatrix(view);
         shader.setProjectionMatrix(projection);
 

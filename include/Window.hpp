@@ -17,6 +17,7 @@ public:
     bool isKeyPressed(int key) { return glfwGetKey(window, key) == GLFW_PRESS; };
     void setPolygonMode(unsigned int mode) { glPolygonMode(GL_FRONT_AND_BACK, mode); };
     void setLineWidth(float width) { glLineWidth(width); };
+    static void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 private:
     GLFWwindow* window;
 };
