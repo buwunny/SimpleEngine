@@ -1,19 +1,19 @@
-#include "../../include/objects/Cube.hpp"
+#include "../../include/objects/Plane.hpp"
 
-Cube::Cube(int size, glm::mat4 model, glm::vec4 color) {
-    mesh = new CubeMesh(size);
-    collider = new CubeCollider(glm::vec3(model[3]), size);
+Plane::Plane(int size, glm::mat4 model, glm::vec4 color) {
+    mesh = new PlaneMesh(size, size, 1);
+    collider = new CubeCollider(glm::vec3(model[3]), glm::vec3(size, 0.01f, size));
     this->model = model;
     this->color = color;
 }
 
 
-Cube::~Cube() {
+Plane::~Plane() {
     delete mesh;
     delete collider;
 }
 
-void Cube::render(Window& window, Shader& shader) {
+void Plane::render(Window& window, Shader& shader) {
     shader.setModelMatrix(model);
     window.setPolygonMode(GL_FILL);
     shader.setFragmentColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
@@ -24,7 +24,7 @@ void Cube::render(Window& window, Shader& shader) {
     mesh->render();;
 }
 
-void Cube::renderTransparent(Window& window, Shader& shader) {
+void Plane::renderTransparent(Window& window, Shader& shader) {
     shader.setModelMatrix(model);
     window.setPolygonMode(GL_LINE);
     window.setLineWidth(3.0f);
@@ -32,14 +32,14 @@ void Cube::renderTransparent(Window& window, Shader& shader) {
     mesh->render();;
 }
 
-void Cube::renderFill(Window& window, Shader& shader) {
+void Plane::renderFill(Window& window, Shader& shader) {
     shader.setModelMatrix(model);
     window.setPolygonMode(GL_FILL);
     shader.setFragmentColor(color);
     mesh->render();
 }
 
-void Cube::checkCollision(Object* other) {
+void Plane::checkCollision(Object* other) {
     if (collider->checkCollision(*other->getCollider())) {
         std::cout << "Collision detected!" << std::endl;
     }

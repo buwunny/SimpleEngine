@@ -4,6 +4,7 @@
 #include "../include/Shader.hpp"
 #include "../include/colliders/CubeCollider.hpp"
 #include "../include/objects/Cube.hpp"
+#include "../include/objects/Plane.hpp"
 #include "../include/Camera.hpp"
 #include "../include/InputHandler.hpp"
 #include "../include/Window.hpp"
@@ -16,21 +17,25 @@ int main()
     Window window(800, 600, "Spinning Cube");
     Camera playerCamera(glm::vec3(0.0f, 0.0f, 3.0f), glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     InputHandler inputHandler(&playerCamera);
-    CubeCollider playerCollider(glm::vec3(0.0f), 1.0f);
 
     glfwSetWindowUserPointer(window.getWindow(), &inputHandler);
     glfwSetCursorPosCallback(window.getWindow(), inputHandler.mouse_callback);    
 
-    Object* objects[4];
+    Object* objects[5];
     Cube cube1(1);
     Cube cube2(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f)), glm::vec4(0.0f, 0.5f, 0.5f, 1.0f));
     Cube cube3(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 6.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.0f, 1.0f));
     Cube cube4(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 9.0f, 0.0f)), glm::vec4(0.5f, 0.0f, 0.5f, 1.0f));
+    Plane plane(10, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -3.0f, 0.0f)), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
     objects[0] = &cube1;
     objects[1] = &cube2;
     objects[2] = &cube3;
     objects[3] = &cube4;
-    Shader shader("../shaders/vertex.glsl", "../shaders/fragment.glsl");
+    objects[4] = &plane;
+
+    inputHandler.setObjects(std::vector<Object*>(objects, objects + 5));
+
+    Shader shader("./shaders/vertex.glsl", "./shaders/fragment.glsl");
 
     while (!window.shouldClose())
     {
@@ -38,19 +43,7 @@ int main()
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        inputHandler.processInput(&window, deltaTime);
-
-        playerCollider.setPosition(playerCamera.getPosition());
-        for (int i = 0; i < 4; i++) {
-            if(playerCollider.checkCollision(*objects[i]->getCollider())) {
-                std::cout << "Collision detected!" << std::endl;
-            }
-            else {
-                std::cout << "Player position: " << playerCamera.getPosition().x << ", " << playerCamera.getPosition().y << ", " << playerCamera.getPosition().z << std::endl;
-            } 
-        }
-
-    
+        inputHandler.processInput(&window, deltaTime);    
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -67,6 +60,7 @@ int main()
         cube2.render(window, shader);
         cube3.renderTransparent(window, shader);
         cube4.renderFill(window, shader);
+        plane.render(window, shader);
         // plane.setModel(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f)));
         // renderMeshWireframe(plane, window, shader, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
         
