@@ -1,8 +1,17 @@
 #include "../../include/objects/Cube.hpp"
 
-Cube::Cube(int size, glm::mat4 model, glm::vec4 color) {
+Cube::Cube(int size, glm::mat4 model, glm::vec4 color, float mass) {
     mesh = new CubeMesh(size);
-    collider = new CubeCollider(glm::vec3(model[3]), size);
+    collisionShape = new btBoxShape(btVector3(size / 2.0f, size / 2.0f, size / 2.0f));
+    btVector3 localInertia(0, 0, 0);
+    if (mass != 0.0f) {
+        collisionShape->calculateLocalInertia(mass, localInertia);
+    }
+    btTransform transform;
+    transform.setFromOpenGLMatrix(glm::value_ptr(model));
+    btDefaultMotionState* motionState = new btDefaultMotionState(transform);
+    btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, motionState, collisionShape, localInertia);
+    rigidBody = new btRigidBody(rbInfo);
     this->model = model;
     this->color = color;
 }
@@ -10,7 +19,8 @@ Cube::Cube(int size, glm::mat4 model, glm::vec4 color) {
 
 Cube::~Cube() {
     delete mesh;
-    delete collider;
+    delete collisionShape;
+    delete rigidBody;
 }
 
 void Cube::render(Window& window, Shader& shader) {
@@ -37,10 +47,4 @@ void Cube::renderFill(Window& window, Shader& shader) {
     window.setPolygonMode(GL_FILL);
     shader.setFragmentColor(color);
     mesh->render();
-}
-
-void Cube::checkCollision(Object* other) {
-    if (collider->checkCollision(*other->getCollider())) {
-        std::cout << "Collision detected!" << std::endl;
-    }
 }

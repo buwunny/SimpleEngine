@@ -8,6 +8,10 @@ Camera::Camera(glm::vec3 position, glm::vec3 front, glm::vec3 up) {
     this->pitch = 0.0f;
 }
 
+glm::vec3 Camera::getRight() const {
+    return glm::normalize(glm::cross(front, up));
+}
+
 Camera::~Camera() {
 }
 

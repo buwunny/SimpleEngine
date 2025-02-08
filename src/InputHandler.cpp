@@ -6,7 +6,6 @@ InputHandler::InputHandler(Camera* camera) {
     lastY = 300;
     firstMouse = true;
     this->camera = camera;
-    playerCollider = new CubeCollider(camera->getPosition(), 1.0f);
 }
 
 InputHandler::~InputHandler() {
@@ -30,10 +29,7 @@ void InputHandler::processInput(Window *window, float deltaTime) {
     if (window->isKeyPressed(GLFW_KEY_ESCAPE))
         window->close();
     
-    if (!checkCollision(cameraPos)) {
-        camera->setPosition(cameraPos);
-        playerCollider->setPosition(cameraPos);
-    }
+    camera->setPosition(cameraPos);
 }
 
 void InputHandler::processMouse(float xpos, float ypos) {
@@ -56,14 +52,4 @@ void InputHandler::mouse_callback(GLFWwindow* window, double xpos, double ypos) 
     if (inputHandler) {
         inputHandler->processMouse(xpos, ypos);
     }
-}
-
-bool InputHandler::checkCollision(const glm::vec3& newPosition) {
-    playerCollider->setPosition(newPosition);
-    for (Object* object : objects) {
-        if (playerCollider->checkCollision(*object->getCollider())) {
-            return true;
-        }
-    }
-    return false;
 }

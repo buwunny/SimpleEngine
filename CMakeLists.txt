@@ -6,12 +6,12 @@ set(CMAKE_CXX_STANDARD 11)
 set(SOURCES
     src/main.cpp
     src/Shader.cpp
-    src/colliders/CubeCollider.cpp
     src/meshes/PlaneMesh.cpp
     src/meshes/CubeMesh.cpp
     src/meshes/CircleMesh.cpp
     src/objects/Cube.cpp
     src/objects/Plane.cpp
+    src/objects/Player.cpp
     src/Camera.cpp
     src/InputHandler.cpp
     src/Window.cpp

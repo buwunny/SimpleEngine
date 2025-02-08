@@ -13,6 +13,7 @@ public:
     glm::vec3 getPosition() { return position; };
     glm::vec3 getFront() { return front; };
     glm::vec3 getUp() { return up; };
+    glm::vec3 getRight() const;
     float getYaw() { return yaw; };
     float getPitch() { return pitch; };
 
