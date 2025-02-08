@@ -1,7 +1,7 @@
 #include "../../include/objects/Plane.hpp"
 
 Plane::Plane(int size, glm::mat4 model, glm::vec4 color, float mass) {
-    mesh = new PlaneMesh(size, size, 1);
+    mesh = new PlaneMesh(size, size, size / 10.0f);
     collisionShape = new btBoxShape(btVector3(size / 2.0f, 0.01f, size / 2.0f));
     btVector3 localInertia(0, 0, 0);
     if (mass != 0.0f) {

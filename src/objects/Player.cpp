@@ -1,7 +1,7 @@
 #include "../../include/objects/Player.hpp"
 
 Player::Player(Camera* camera, glm::mat4 model) {
-    movementSpeed = 10.0f;
+    movementSpeed = 100.0f;
     lastX = 400;
     lastY = 300;
     firstMouse = true;
@@ -18,6 +18,11 @@ Player::Player(Camera* camera, glm::mat4 model) {
     btRigidBody::btRigidBodyConstructionInfo rbInfo(10, motionState, collisionShape, localInertia);
     rigidBody = new btRigidBody(rbInfo);
     rigidBody->setAngularFactor(btVector3(0, 0, 0));
+
+    rigidBody->setCcdMotionThreshold(0.5);
+    rigidBody->setCcdSweptSphereRadius(0.4);
+
+    rigidBody->setFriction(1.0f);
 }
 
 Player::~Player() {
@@ -26,36 +31,44 @@ Player::~Player() {
     delete rigidBody;
 }
 
-void Player::processInput(Window *window, float deltaTime) {
-    float cameraSpeed = movementSpeed * deltaTime * 1000;
+bool Player::isOnGround(btDiscreteDynamicsWorld* dynamicsWorld) {
+    btVector3 start = rigidBody->getWorldTransform().getOrigin();
+    btVector3 end = start - btVector3(0, 1.05f, 0);
+    btCollisionWorld::ClosestRayResultCallback rayCallback(start, end);
+    dynamicsWorld->rayTest(start, end, rayCallback);
+    return rayCallback.hasHit();
+}
+
+void Player::processInput(Window *window, float deltaTime, btDiscreteDynamicsWorld* dynamicsWorld) {
+    float cameraSpeed = movementSpeed * deltaTime;
     if (window->isKeyPressed(GLFW_KEY_LEFT_SHIFT))
         cameraSpeed *= 2;
 
-    btVector3 velocity(0, 0, 0);
-    btVector3 forwardDir = btVector3(camera->getFront().x, 0, camera->getFront().z);
-    btVector3 rightDir = btVector3(camera->getRight().x, 0, camera->getRight().z);
+    btVector3 velocity = rigidBody->getLinearVelocity();
+    btVector3 forwardDir = btVector3(camera->getFront().x, 0, camera->getFront().z).normalized();
+    btVector3 rightDir = btVector3(camera->getRight().x, 0, camera->getRight().z).normalized();
+
+    bool isOnGround = this->isOnGround(dynamicsWorld);
+    float adjustedSpeed = isOnGround ? cameraSpeed : cameraSpeed * 0.1f;
 
     if (window->isKeyPressed(GLFW_KEY_W))
-        velocity += forwardDir * cameraSpeed;
+        velocity += forwardDir * adjustedSpeed;
     if (window->isKeyPressed(GLFW_KEY_S))
-        velocity -= forwardDir * cameraSpeed;
+        velocity -= forwardDir * adjustedSpeed;
     if (window->isKeyPressed(GLFW_KEY_A))
-        velocity -= rightDir * cameraSpeed;
+        velocity -= rightDir * adjustedSpeed;
     if (window->isKeyPressed(GLFW_KEY_D))
-        velocity += rightDir * cameraSpeed;
+        velocity += rightDir * adjustedSpeed; 
     if (window->isKeyPressed(GLFW_KEY_ESCAPE))
         window->close();
-    if (window->isKeyPressed(GLFW_KEY_SPACE)) {
-        btVector3 jumpVelocity = rigidBody->getLinearVelocity();
-        if (jumpVelocity.getY() == 0) {
-            velocity.setY(10.0f);
-        }
-    }
-    else {
-        velocity.setY(rigidBody->getLinearVelocity().getY());
-    }
+    if (window->isKeyPressed(GLFW_KEY_SPACE) && isOnGround)
+        velocity.setY(10.0f);
 
     rigidBody->activate(true);
+    float maxSpeed = 25.0f;
+    if (velocity.length() > maxSpeed) {
+        velocity = velocity.normalized() * maxSpeed;
+    }
     rigidBody->setLinearVelocity(velocity);
 
     btTransform trans;
