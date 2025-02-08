@@ -21,11 +21,14 @@ add_executable(OpenGLProject ${SOURCES})
 
 set(CMAKE_PREFIX_PATH "C:/msys64/mingw64")
 
+find_package(Bullet REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(GLFW3 REQUIRED)
 find_package(glm REQUIRED)
 
-target_link_libraries(OpenGLProject PRIVATE GLEW::GLEW glfw glm)
+include_directories(${BULLET_INCLUDE_DIRS})
+
+target_link_libraries(OpenGLProject PRIVATE ${BULLET_LIBRARIES} GLEW::GLEW glfw glm)
 
 add_custom_command(TARGET OpenGLProject POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
