@@ -2,8 +2,8 @@
 
 Player::Player(Camera* camera, glm::mat4 model) {
     movementSpeed = 100.0f;
-    lastX = 400;
-    lastY = 300;
+    lastX = 1920/2;
+    lastY = 1080/2;
     firstMouse = true;
     this->camera = camera;
     inputHandler = new InputHandler(camera);
@@ -22,7 +22,7 @@ Player::Player(Camera* camera, glm::mat4 model) {
     rigidBody->setCcdMotionThreshold(0.5);
     rigidBody->setCcdSweptSphereRadius(0.4);
 
-    rigidBody->setFriction(1.0f);
+    rigidBody->setFriction(2.0f);
 }
 
 Player::~Player() {
@@ -41,8 +41,6 @@ bool Player::isOnGround(btDiscreteDynamicsWorld* dynamicsWorld) {
 
 void Player::processInput(Window *window, float deltaTime, btDiscreteDynamicsWorld* dynamicsWorld) {
     float cameraSpeed = movementSpeed * deltaTime;
-    if (window->isKeyPressed(GLFW_KEY_LEFT_SHIFT))
-        cameraSpeed *= 2;
 
     btVector3 velocity = rigidBody->getLinearVelocity();
     btVector3 forwardDir = btVector3(camera->getFront().x, 0, camera->getFront().z).normalized();
@@ -66,6 +64,8 @@ void Player::processInput(Window *window, float deltaTime, btDiscreteDynamicsWor
 
     rigidBody->activate(true);
     float maxSpeed = 25.0f;
+    if (window->isKeyPressed(GLFW_KEY_LEFT_SHIFT))
+        maxSpeed *= 2;
     if (velocity.length() > maxSpeed) {
         velocity = velocity.normalized() * maxSpeed;
     }

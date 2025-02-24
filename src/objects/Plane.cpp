@@ -12,6 +12,9 @@ Plane::Plane(int size, glm::mat4 model, glm::vec4 color, float mass) {
     btDefaultMotionState* motionState = new btDefaultMotionState(transform);
     btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, motionState, collisionShape, localInertia);
     rigidBody = new btRigidBody(rbInfo);
+
+    rigidBody->setFriction(1.0f);
+
     this->model = model;
     this->color = color;
 }

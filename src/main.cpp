@@ -24,18 +24,26 @@ int main()
     btDiscreteDynamicsWorld* dynamicsWorld = new btDiscreteDynamicsWorld(dispatcher, overlappingPairCache, solver, collisionConfiguration);
     dynamicsWorld->setGravity(btVector3(0, -9.81*2, 0));
 
-    Window window(800, 600, "Spinning Cube");
+    Window window(1920, 1080, "Spinning Cube");
     Camera playerCamera(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
     Player player(&playerCamera, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 10.0f)));
     glfwSetWindowUserPointer(window.getWindow(), &player);
     glfwSetCursorPosCallback(window.getWindow(), player.mouse_callback);    
     
-    int numObjects = 10;
+    int numObjects = 1000;
     Object* objects[numObjects];
     objects[0] = &player;
 
-    Cube cube1(3, glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 15.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f), 0.0f);
+    for (int i = 10; i < numObjects; i++)
+    {
+        float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+        float g = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+        float b = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+        objects[i] = new Cube(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f + i * 3.0f, 0.0f)), glm::vec4(r, g, b, 1.0f), 1.0f);
+    }
+
+    Cube cube1(3, glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 15.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f), 10.0f);
     Cube cube2(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f)), glm::vec4(0.0f, 0.5f, 0.5f, 1.0f), 1.0f);
     Cube cube3(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 6.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.0f, 1.0f), 1.0f);
     Cube cube4(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 9.0f, 0.0f)), glm::vec4(0.5f, 0.0f, 0.5f, 1.0f), 1.0f);
@@ -91,23 +99,19 @@ int main()
             trans.getOpenGLMatrix(matrix);
             glm::mat4 modelMatrix = glm::make_mat4(matrix);
             objects[i]->setModel(modelMatrix);
+            objects[i]->renderFill(window, shader);
         }
-        
-        btTransform trans;
-        cube1.getRigidBody()->getMotionState()->getWorldTransform(trans);
-        trans.setRotation(btQuaternion(btVector3(0.5f, 1.0f, 0.0f), (float)glfwGetTime()));
-        cube1.getRigidBody()->getMotionState()->setWorldTransform(trans);
-        cube1.setModel(glm::rotate(glm::mat4(1.0f), (float)glfwGetTime(), glm::vec3(0.5f, 1.0f, 0.0f)));
-        cube1.render(window, shader);
 
-        cube2.render(window, shader);
-        cube3.renderTransparent(window, shader);
-        cube4.renderFill(window, shader);
-        ground.render(window, shader);
-        plane1.render(window, shader);
-        plane2.render(window, shader);
-        plane3.render(window, shader);
-        plane4.render(window, shader);
+        // cube1.render(window, shader);
+
+        // cube2.render(window, shader);
+        // cube3.renderTransparent(window, shader);
+        // cube4.renderFill(window, shader);
+        // ground.render(window, shader);
+        // plane1.render(window, shader);
+        // plane2.render(window, shader);
+        // plane3.render(window, shader);
+        // plane4.render(window, shader);
         
         window.update();
     }
