@@ -8,6 +8,7 @@
 #include "../include/objects/Cube.hpp"
 #include "../include/objects/Plane.hpp"
 #include "../include/objects/Player.hpp"
+#include "../include/rooms/BasicRoom.hpp"
 #include "../include/Camera.hpp"
 #include "../include/InputHandler.hpp"
 #include "../include/Window.hpp"
@@ -31,42 +32,35 @@ int main()
     glfwSetWindowUserPointer(window.getWindow(), &player);
     glfwSetCursorPosCallback(window.getWindow(), player.mouse_callback);    
     
-    int numObjects = 1000;
-    Object* objects[numObjects];
-    objects[0] = &player;
+    std::vector<Object> objects;
 
-    for (int i = 10; i < numObjects; i++)
-    {
-        float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
-        float g = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
-        float b = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
-        objects[i] = new Cube(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f + i * 3.0f, 0.0f)), glm::vec4(r, g, b, 1.0f), 1.0f);
-    }
+    // for (int i = 10; i < numObjects; i++)
+    // {
+    //     float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    //     float g = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    //     float b = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    //     objects[i] = new Cube(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f + i * 3.0f, 0.0f)), glm::vec4(r, g, b, 1.0f), 1.0f);
+    // }
 
-    Cube cube1(3, glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 15.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f), 10.0f);
-    Cube cube2(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f)), glm::vec4(0.0f, 0.5f, 0.5f, 1.0f), 1.0f);
-    Cube cube3(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 6.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.0f, 1.0f), 1.0f);
-    Cube cube4(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 9.0f, 0.0f)), glm::vec4(0.5f, 0.0f, 0.5f, 1.0f), 1.0f);
-    Plane ground(100, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -3.0f, 0.0f)), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), 0.0f);
-    Plane plane1(100, glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(50.0f, -3.0f, 0.0f)), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), 0.0f);
-    Plane plane2(100, glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(-50.0f, -3.0f, 0.0f)), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), 0.0f);
-    Plane plane3(100, glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -3.0f, 50.0f)), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), 0.0f);
-    Plane plane4(100, glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -3.0f, -50.0f)), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f)), glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), 0.0f);
-    objects[1] = &cube1;
-    objects[2] = &cube2;
-    objects[3] = &cube3;
-    objects[4] = &cube4;
-    objects[5] = &ground;
-    objects[6] = &plane1;
-    objects[7] = &plane2;
-    objects[8] = &plane3;
-    objects[9] = &plane4;
+    // Cube cube1(3, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 15.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.5f, 1.0f), 10.0f);
+    // Cube cube2(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 0.0f)), glm::vec4(0.0f, 0.5f, 0.5f, 1.0f), 1.0f);
+    // Cube cube3(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 6.0f, 0.0f)), glm::vec4(0.5f, 0.5f, 0.0f, 1.0f), 1.0f);
+    // Cube cube4(2, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 9.0f, 0.0f)), glm::vec4(0.5f, 0.0f, 0.5f, 1.0f), 1.0f);
+    // objects[1] = &cube1;
+    // objects[2] = &cube2;
+    // objects[3] = &cube3;
+    // objects[4] = &cube4;
 
 
-    for (int i = 0; i < numObjects; i++)
-    {
-        dynamicsWorld->addRigidBody(objects[i]->getRigidBody());
-    }
+    // for (int i = 0; i < numObjects; i++)
+    // {
+    //     dynamicsWorld->addRigidBody(objects[i]->getRigidBody());
+    // }
+
+    BasicRoom room(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    room.addRigidBodiesToWorld(dynamicsWorld);
+    dynamicsWorld->addRigidBody(player.getRigidBody());
+
 
     Shader shader("./shaders/vertex.glsl", "./shaders/fragment.glsl");
 
@@ -91,27 +85,20 @@ int main()
         shader.setViewMatrix(view);
         shader.setProjectionMatrix(projection);
 
-        for (int i = 0; i < numObjects; i++)
-        {
-            btTransform trans;
-            objects[i]->getRigidBody()->getMotionState()->getWorldTransform(trans);
-            btScalar matrix[16];
-            trans.getOpenGLMatrix(matrix);
-            glm::mat4 modelMatrix = glm::make_mat4(matrix);
-            objects[i]->setModel(modelMatrix);
-            objects[i]->renderFill(window, shader);
-        }
+        // for (int i = 0; i < numObjects; i++)
+        // {
+        //     btTransform trans;
+        //     objects[i]->getRigidBody()->getMotionState()->getWorldTransform(trans);
+        //     btScalar matrix[16];
+        //     trans.getOpenGLMatrix(matrix);
+        //     glm::mat4 modelMatrix = glm::make_mat4(matrix);
+        //     objects[i]->setModel(modelMatrix);
+        //     objects[i]->render(window, shader);
+        // }
 
-        // cube1.render(window, shader);
-
-        // cube2.render(window, shader);
-        // cube3.renderTransparent(window, shader);
-        // cube4.renderFill(window, shader);
-        // ground.render(window, shader);
-        // plane1.render(window, shader);
-        // plane2.render(window, shader);
-        // plane3.render(window, shader);
-        // plane4.render(window, shader);
+        player.update();
+        room.update();
+        room.render(window, shader);
         
         window.update();
     }

@@ -15,6 +15,14 @@ public:
     virtual void render(Window& window, Shader& shader) = 0;
     virtual void renderTransparent(Window& window, Shader& shader) = 0;
     virtual void renderFill(Window& window, Shader& shader) = 0;
+    void update() {
+        btTransform trans;
+        this->getRigidBody()->getMotionState()->getWorldTransform(trans);
+        btScalar matrix[16];
+        trans.getOpenGLMatrix(matrix);
+        glm::mat4 modelMatrix = glm::make_mat4(matrix);
+        this->setModel(modelMatrix);
+    };
     glm::mat4 getModel() { return model; };
     glm::vec4 getColor() { return color; };
     Mesh* getMesh() { return mesh; };

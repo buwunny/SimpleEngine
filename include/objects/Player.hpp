@@ -22,10 +22,10 @@ public:
     void render(Window& window, Shader& shader) {};
     void renderTransparent(Window& window, Shader& shader) {};
     void renderFill(Window& window, Shader& shader) {};
-    void update();
 private:
     Camera* camera;
     InputHandler* inputHandler;
+    float mass;
     float movementSpeed;
     float lastX, lastY;
     bool firstMouse;

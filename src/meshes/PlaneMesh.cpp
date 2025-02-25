@@ -1,26 +1,26 @@
 #include "../../include/meshes/PlaneMesh.hpp"
 
-PlaneMesh::PlaneMesh(int length, int width, int subdivisions) {
-    float halfLength = length / 2.0f;
-    float halfWidth = width / 2.0f;
-    float stepLength = length / static_cast<float>(subdivisions);
-    float stepWidth = width / static_cast<float>(subdivisions);
+PlaneMesh::PlaneMesh(float x, float z, int xSubdivisions, int zSubdivisions) {
+    float halfX = x / 2.0f;
+    float halfZ = z / 2.0f;
+    float stepX = x / static_cast<float>(xSubdivisions);
+    float stepZ = z / static_cast<float>(zSubdivisions);
 
-    for (int i = 0; i <= subdivisions; ++i) {
-        for (int j = 0; j <= subdivisions; ++j) {
-            float x = -halfLength + j * stepWidth;
-            float z = -halfWidth + i * stepLength;
-            vertices.push_back(x);
+    for (int i = 0; i <= zSubdivisions; ++i) {
+        for (int j = 0; j <= xSubdivisions; ++j) {
+            float posX = -halfX + j * stepX;
+            float posZ = -halfZ + i * stepZ;
+            vertices.push_back(posX);
             vertices.push_back(0.0f);
-            vertices.push_back(z);
+            vertices.push_back(posZ);
         }
     }
 
-    for (int i = 0; i < subdivisions; ++i) {
-        for (int j = 0; j < subdivisions; ++j) {
-            int topLeft = i * (subdivisions + 1) + j;
+    for (int i = 0; i < zSubdivisions; ++i) {
+        for (int j = 0; j < xSubdivisions; ++j) {
+            int topLeft = i * (xSubdivisions + 1) + j;
             int topRight = topLeft + 1;
-            int bottomLeft = (i + 1) * (subdivisions + 1) + j;
+            int bottomLeft = (i + 1) * (xSubdivisions + 1) + j;
             int bottomRight = bottomLeft + 1;
 
             indices.push_back(topLeft);

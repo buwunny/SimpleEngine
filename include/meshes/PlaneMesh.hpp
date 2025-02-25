@@ -5,7 +5,7 @@
 
 class PlaneMesh : public Mesh {
 public:
-    PlaneMesh(int length, int width, int subdivisions);
+    PlaneMesh(float x, float z, int xSubdivisions, int zSubdivisions);
     ~PlaneMesh();
 
     void render();

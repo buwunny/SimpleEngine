@@ -1,6 +1,7 @@
 #include "../../include/objects/Player.hpp"
 
 Player::Player(Camera* camera, glm::mat4 model) {
+    mass = 10.0f;
     movementSpeed = 100.0f;
     lastX = 1920/2;
     lastY = 1080/2;
@@ -9,20 +10,20 @@ Player::Player(Camera* camera, glm::mat4 model) {
     inputHandler = new InputHandler(camera);
     collisionShape = new btCapsuleShape(0.5f, 1.0f);
     btVector3 localInertia(0, 0, 0);
-    collisionShape->calculateLocalInertia(10, localInertia);
+    collisionShape->calculateLocalInertia(mass, localInertia);
 
     btTransform transform;
     transform.setFromOpenGLMatrix(glm::value_ptr(model));
     btDefaultMotionState* motionState = new btDefaultMotionState(transform);
 
-    btRigidBody::btRigidBodyConstructionInfo rbInfo(10, motionState, collisionShape, localInertia);
+    btRigidBody::btRigidBodyConstructionInfo rbInfo(mass, motionState, collisionShape, localInertia);
     rigidBody = new btRigidBody(rbInfo);
     rigidBody->setAngularFactor(btVector3(0, 0, 0));
 
     rigidBody->setCcdMotionThreshold(0.5);
     rigidBody->setCcdSweptSphereRadius(0.4);
 
-    rigidBody->setFriction(2.0f);
+    rigidBody->setFriction(1.0f);
 }
 
 Player::~Player() {
@@ -63,7 +64,7 @@ void Player::processInput(Window *window, float deltaTime, btDiscreteDynamicsWor
         velocity.setY(10.0f);
 
     rigidBody->activate(true);
-    float maxSpeed = 25.0f;
+    float maxSpeed = 10.0f;
     if (window->isKeyPressed(GLFW_KEY_LEFT_SHIFT))
         maxSpeed *= 2;
     if (velocity.length() > maxSpeed) {
