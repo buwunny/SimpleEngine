@@ -73,6 +73,10 @@ set(SOURCES
     src/core/Camera.cpp
     src/platform/Window.cpp
     src/app/Application.cpp
+    # In-game settings overlay. Lives in the shared list because the standalone
+    # game targets are built from ${SOURCES} alone; the editor compiles it too
+    # and simply never references it, since it configures VFX through ImGui.
+    src/app/GameMenu.cpp
     src/render/PostFX.cpp
     src/render/TextRenderer.cpp
     src/script/CowScript.cpp

@@ -1,18 +1,40 @@
 {
     "objects": [
         {
-            "color": "#999999FF",
-            "length": 1000.0,
+            "color": "#FFFFFFFF",
             "mass": 0.0,
-            "name": "Plane 1",
+            "mesh": "models/eiffel_tower.obj",
+            "name": "StaticObject 6",
             "position": [
-                0.0,
+                -28.18863296508789,
                 0.0,
                 0.0
             ],
             "rotation": [
-                0.0,
+                -90.0,
                 -0.0,
+                0.0
+            ],
+            "scale": [
+                0.0020000000949949026,
+                0.0020000000949949026,
+                0.0020000000949949026
+            ],
+            "type": "StaticObject"
+        },
+        {
+            "color": "#7FBCE6FF",
+            "mass": 0.009999999776482582,
+            "mesh": "models/cow.obj",
+            "name": "StaticObject 5",
+            "position": [
+                2.4404044151306152,
+                3.9000000953674316,
+                -5.0
+            ],
+            "rotation": [
+                0.0,
+                11.677236557006836,
                 0.0
             ],
             "scale": [
@@ -20,30 +42,35 @@
                 1.0,
                 1.0
             ],
-            "type": "Plane",
-            "width": 1000.0
+            "scripts": [
+                "scripts/jump_on_space.cow"
+            ],
+            "type": "StaticObject"
         },
         {
-            "color": "#FF3333FF",
-            "mass": 1.0,
-            "name": "Cube 2",
+            "color": "#C88F7FFF",
+            "mass": 100.0,
+            "mesh": "models/cow.obj",
+            "name": "StaticObject 4",
             "position": [
-                0.0,
-                6.1362152099609375,
-                0.0
+                7.817673683166504,
+                5.661375522613525,
+                3.92138671875
             ],
             "rotation": [
                 0.0,
-                -0.0,
+                -44.49415969848633,
                 0.0
             ],
             "scale": [
-                5.0,
-                5.0,
-                5.0
+                1.0,
+                1.0,
+                1.0
             ],
-            "size": 1,
-            "type": "Cube"
+            "scripts": [
+                "scripts/spin.cow"
+            ],
+            "type": "StaticObject"
         },
         {
             "color": "#33FF33FF",
@@ -68,72 +95,49 @@
             "type": "Cube"
         },
         {
-            "color": "#C88F7FFF",
-            "mass": 100.0,
-            "mesh": "models/cow.obj",
-            "name": "StaticObject 4",
+            "color": "#FF3333FF",
+            "mass": 1.0,
+            "name": "Cube 2",
             "position": [
-                7.817673683166504,
-                5.661375522613525,
-                3.92138671875
-            ],
-            "rotation": [
                 0.0,
-                -44.49415969848633,
-                0.0
-            ],
-            "scale": [
-                1.0,
-                1.0,
-                1.0
-            ],
-            "script": "scripts/spin.cow",
-            "type": "StaticObject"
-        },
-        {
-            "color": "#7FBCE6FF",
-            "mass": 0.009999999776482582,
-            "mesh": "models/cow.obj",
-            "name": "StaticObject 5",
-            "position": [
-                2.4404044151306152,
-                3.9000000953674316,
-                -5.0
-            ],
-            "rotation": [
-                0.0,
-                11.677236557006836,
-                0.0
-            ],
-            "scale": [
-                1.0,
-                1.0,
-                1.0
-            ],
-            "script": "scripts/jump_on_space.cow",
-            "type": "StaticObject"
-        },
-        {
-            "color": "#FFFFFFFF",
-            "mass": 0.0,
-            "mesh": "models/eiffel_tower.obj",
-            "name": "StaticObject 6",
-            "position": [
-                -28.18863296508789,
-                0.0,
+                6.1362152099609375,
                 0.0
             ],
             "rotation": [
-                -90.0,
+                0.0,
                 -0.0,
                 0.0
             ],
             "scale": [
-                0.0020000000949949026,
-                0.0020000000949949026,
-                0.0020000000949949026
+                5.0,
+                5.0,
+                5.0
             ],
-            "type": "StaticObject"
+            "size": 1,
+            "type": "Cube"
+        },
+        {
+            "color": "#999999FF",
+            "length": 1000.0,
+            "mass": 0.0,
+            "name": "Plane 1",
+            "position": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "rotation": [
+                0.0,
+                -0.0,
+                0.0
+            ],
+            "scale": [
+                1.0,
+                1.0,
+                1.0
+            ],
+            "type": "Plane",
+            "width": 1000.0
         }
     ],
     "scenePath": "scenes/scene.json"

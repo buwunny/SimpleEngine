@@ -68,6 +68,8 @@ Application::~Application()
     delete editorUI;
     delete editorInput;
     delete colliderDebug;
+#else
+    delete gameMenu;
 #endif
     delete scriptHost;
     delete postfx;
@@ -78,11 +80,40 @@ Application::~Application()
 #endif
 }
 
+// One frame's explosion lights, gathered once and handed to both the scene
+// shader and the sky pass. Zero-length whenever the effect is off or nothing is
+// currently exploding, which is the overwhelmingly common case — the shaders
+// skip their light loops entirely on a count of 0.
+struct FrameBlastLights
+{
+    glm::vec4 posRadius[editor::kMaxBlastLights];
+    glm::vec4 colorIntensity[editor::kMaxBlastLights];
+    int count = 0;
+
+    PostFX::BlastLights forPostFX() const
+    {
+        return PostFX::BlastLights{posRadius, colorIntensity, count};
+    }
+};
+
+static FrameBlastLights gatherBlastLights(ecs::Registry &reg, const editor::VFX &vfx)
+{
+    FrameBlastLights out;
+    if (!vfx.explosionLightEnabled)
+        return out;
+    out.count = ecs::collectBlastLights(reg, out.posRadius, out.colorIntensity,
+                                        editor::kMaxBlastLights,
+                                        vfx.explosionLightReach,
+                                        vfx.explosionLightIntensity);
+    return out;
+}
+
 // Push VFX uniforms (fog, neon intensity, camera pos) into the main scene
 // shader. Called once per render to avoid redundant setUniform churn inside
 // renderSystem. Safe to call any time after shader->use().
 static void applyVfxToSceneShader(Shader &shader, const glm::vec3 &camPos,
-                                  const editor::VFX &vfx)
+                                  const editor::VFX &vfx,
+                                  const FrameBlastLights &lights)
 {
     shader.setVec3("uCamPos", camPos);
     shader.setInt("uFogEnabled", vfx.fogEnabled ? 1 : 0);
@@ -90,6 +121,13 @@ static void applyVfxToSceneShader(Shader &shader, const glm::vec3 &camPos,
     shader.setFloat("uFogStart", vfx.fogStart);
     shader.setFloat("uFogEnd", vfx.fogEnd);
     shader.setFloat("uNeonIntensity", vfx.neonEnabled ? vfx.neonIntensity : 1.0f);
+
+    shader.setInt("uBlastLightCount", lights.count);
+    if (lights.count > 0)
+    {
+        shader.setVec4Array("uBlastLightPos", lights.posRadius, lights.count);
+        shader.setVec4Array("uBlastLightColor", lights.colorIntensity, lights.count);
+    }
 }
 
 void Application::init()
@@ -146,6 +184,12 @@ void Application::init()
     // served by Window's own backend (GLFW on desktop, a native emscripten
     // keydown/keyup handler on web), so no ImGui frame lifecycle is required.
     window->setCursorDisabled(true);
+
+    // The settings the player last chose, before the first frame is drawn —
+    // booting into the defaults and then snapping to their choices would be
+    // visible. A first run finds nothing stored and keeps the defaults.
+    gameMenu = new GameMenu();
+    GameMenu::loadSettings(gameVfx);
 
     scriptHost = new ScriptHost();
     scriptHost->setContext(scene, window);
@@ -241,33 +285,51 @@ void Application::tick()
         emscripten_get_canvas_element_size("canvas", &width, &height);
 #else
         glfwGetFramebufferSize(window->getWindow(), &width, &height);
-        if (window->isKeyPressed(GLFW_KEY_ESCAPE))
-            window->close();
 #endif
         if (width < 1)
             width = 1;
         if (height < 1)
             height = 1;
 
-        // Fixed-step gameplay (input + physics + scripts); mouse-look and
-        // cursor toggle stay per-frame below.
-        advanceSim(delta, true);
+        // Escape opens the settings menu rather than quitting outright — Quit
+        // is a row in it now, so the key that used to end the game without
+        // warning asks first.
+        const bool menuActive = gameMenu && gameMenu->update(*window, gameVfx, delta);
+        if (gameMenu && gameMenu->quitRequested())
+        {
+            window->close();
+            return;
+        }
 
-        ecs::playerInputSystem(scene->registry(), window, physics, delta);
+        // Gameplay is frozen while the menu is up. Skipping advanceSim rather
+        // than merely ignoring input is deliberate: the menu is modal, and a
+        // player who opens it mid-flight should not land — or be shot — while
+        // reading it.
+        if (!menuActive)
+        {
+            // Fixed-step gameplay (input + physics + scripts); mouse-look and
+            // cursor toggle stay per-frame below.
+            advanceSim(delta, true);
+
+            ecs::playerInputSystem(scene->registry(), window, physics, delta);
+        }
 
         glm::mat4 view = glm::lookAt(camera->getPosition(), camera->getPosition() + camera->getFront(), camera->getUp());
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 10000.0f);
 
-        postfx->ensure(width, height);
+        const FrameBlastLights blastLights = gatherBlastLights(scene->registry(), gameVfx);
+
+        postfx->ensure(width, height, gameVfx.quality);
         postfx->beginSceneCapture();
-        postfx->drawBackground(view, projection, camera->getPosition(), gameVfx);
+        postfx->drawBackground(view, projection, camera->getPosition(), gameVfx,
+                               blastLights.forPostFX());
 
         glEnable(GL_DEPTH_TEST);
         ecs::setWireframeFillEnabled(gameVfx.wireframeFill);
         shader->use();
         shader->setViewMatrix(view);
         shader->setProjectionMatrix(projection);
-        applyVfxToSceneShader(*shader, camera->getPosition(), gameVfx);
+        applyVfxToSceneShader(*shader, camera->getPosition(), gameVfx, blastLights);
 
         scene->syncFromPhysics();
         scene->render(*window, *shader);
@@ -277,6 +339,11 @@ void Application::tick()
         postfx->compositeTo(0, 0, 0, width, height, gameVfx, static_cast<float>(scriptTime));
 
         text->drawScreen("FPS: " + std::to_string(static_cast<int>(displayFps)), 10.0f, 10.0f, 16.0f, glm::vec4(1.0f), width, height);
+
+        // Last, over the finished frame — including the post-process, so the
+        // menu is never itself bloomed or scanlined.
+        if (gameMenu)
+            gameMenu->render(*text, gameVfx, width, height);
 
         window->update();
         return;
@@ -476,16 +543,19 @@ void Application::tick()
 
     const editor::VFX &vfx = editorUI ? editorUI->getVFX() : gameVfx;
 
-    postfx->ensure(gameFbWidth, gameFbHeight);
+    const FrameBlastLights blastLights = gatherBlastLights(scene->registry(), vfx);
+
+    postfx->ensure(gameFbWidth, gameFbHeight, vfx.quality);
     postfx->beginSceneCapture();
-    postfx->drawBackground(view, projection, camera->getPosition(), vfx);
+    postfx->drawBackground(view, projection, camera->getPosition(), vfx,
+                           blastLights.forPostFX());
 
     glEnable(GL_DEPTH_TEST);
     ecs::setWireframeFillEnabled(vfx.wireframeFill);
     shader->use();
     shader->setViewMatrix(view);
     shader->setProjectionMatrix(projection);
-    applyVfxToSceneShader(*shader, camera->getPosition(), vfx);
+    applyVfxToSceneShader(*shader, camera->getPosition(), vfx, blastLights);
 
     scene->syncFromPhysics();
     scene->render(*window, *shader);

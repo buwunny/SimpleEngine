@@ -21,6 +21,10 @@
 #include "core/InputHandler.hpp"
 #include "render/ColliderDebugDrawer.hpp"
 #include "editor/EditorContext.hpp"
+#else
+// The standalone counterpart: the editor configures VFX through its ImGui
+// panel, a shipped game through this.
+#include "app/GameMenu.hpp"
 #endif
 
 namespace net
@@ -72,6 +76,8 @@ private:
     EditorUI *editorUI = nullptr;
     InputHandler *editorInput = nullptr;
     ColliderDebugDrawer *colliderDebug = nullptr;
+#else
+    GameMenu *gameMenu = nullptr;
 #endif
     ScriptHost *scriptHost = nullptr;
     PostFX *postfx = nullptr;

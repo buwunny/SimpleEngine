@@ -54,4 +54,54 @@ namespace ecs
         for (Entity e : expired)
             r.destroy(e);
     }
+
+    int collectBlastLights(Registry &r, glm::vec4 *posRadius, glm::vec4 *colorIntensity,
+                           int maxLights, float reach, float intensity)
+    {
+        if (!posRadius || !colorIntensity || maxLights <= 0)
+            return 0;
+
+        int count = 0;
+        auto view = r.view<Transform, BlastVfx>();
+        for (auto e : view)
+        {
+            const auto &vfx = view.get<BlastVfx>(e);
+            if (vfx.life <= 0.0f)
+                continue;
+            const float t = glm::clamp(vfx.age / vfx.life, 0.0f, 1.0f);
+
+            // The light punches hard and dies faster than the ring it came
+            // from. A blast that lit the scene evenly across its whole life
+            // reads as a lamp being switched on and off; the sharp decay is
+            // what makes it read as a detonation.
+            const float inv = 1.0f - t;
+            const float brightness = inv * inv * inv * intensity;
+            if (brightness <= 0.001f)
+                continue;
+
+            const auto &tr = view.get<Transform>(e);
+            const glm::vec4 pr(glm::vec3(tr.position), vfx.radius * reach);
+            const glm::vec4 ci(glm::vec3(vfx.color), brightness);
+
+            if (count < maxLights)
+            {
+                posRadius[count] = pr;
+                colorIntensity[count] = ci;
+                ++count;
+                continue;
+            }
+
+            // Full: replace the dimmest slot, but only if this one beats it.
+            int dimmest = 0;
+            for (int i = 1; i < maxLights; ++i)
+                if (colorIntensity[i].a < colorIntensity[dimmest].a)
+                    dimmest = i;
+            if (brightness > colorIntensity[dimmest].a)
+            {
+                posRadius[dimmest] = pr;
+                colorIntensity[dimmest] = ci;
+            }
+        }
+        return count;
+    }
 }

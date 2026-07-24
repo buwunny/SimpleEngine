@@ -5,3 +5,5 @@ CMakeCache.txt
 vcpkg_installed
 imgui.ini
 !tools/build
+# Player-chosen VFX settings, written next to the running game by GameMenu.
+cowengine_settings.txt

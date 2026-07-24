@@ -98,6 +98,13 @@ void Shader::setVec4(const char *name, const glm::vec4 &v)
     glUniform4f(glGetUniformLocation(ID, name), v.x, v.y, v.z, v.w);
 }
 
+void Shader::setVec4Array(const char *name, const glm::vec4 *v, int count)
+{
+    if (!v || count <= 0)
+        return;
+    glUniform4fv(glGetUniformLocation(ID, name), count, glm::value_ptr(v[0]));
+}
+
 void Shader::setVec2(const char *name, const glm::vec2 &v)
 {
     glUniform2f(glGetUniformLocation(ID, name), v.x, v.y);

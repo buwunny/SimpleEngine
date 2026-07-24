@@ -4,6 +4,7 @@
 
 #include <glm/gtc/matrix_inverse.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -41,7 +42,22 @@ namespace
         return std::string();
     }
 
-    std::string adjustForGLES(std::string src, bool isFragment)
+    // Everything spliced in below the #version line: the GLES precision
+    // qualifier and the quality #defines both have to land there, since GLSL
+    // requires #version to be the first thing in the file.
+    std::string injectAfterVersion(std::string src, const std::string &text)
+    {
+        if (text.empty())
+            return src;
+        size_t nl = src.find('\n');
+        if (nl == std::string::npos)
+            return text + src;
+        return src.insert(nl + 1, text);
+    }
+
+    // `wantsHighp` is the shader's own answer to whether it can survive
+    // mediump, not a quality setting — see the call sites.
+    std::string adjustForGLES(std::string src, bool isFragment, bool wantsHighp)
     {
 #if defined(__EMSCRIPTEN__)
         const std::string v330 = "#version 330 core";
@@ -51,19 +67,42 @@ namespace
             src.replace(pos, v330.size(), v300);
         if (isFragment && src.find("precision") == std::string::npos)
         {
-            // highp avoids precision artifacts in the sky shader's matrix
-            // reconstruction and in distance-based fog at large world scales.
-            size_t p = src.find(v300);
-            std::string precision = "\nprecision highp float;\n";
-            if (p != std::string::npos)
-                src.insert(p + v300.size(), precision);
-            else
-                src = precision + src;
+            // Default to mediump. Mobile GPUs run mediump at roughly twice the
+            // rate of highp and the bloom chain is the bulk of the frame's
+            // fragment work, so forcing highp everywhere — as this used to —
+            // was leaving half the fill rate on the table for passes that only
+            // ever touch 0..1 colour values.
+            //
+            // The sky shader is the exception and asks for highp: it
+            // reconstructs world positions from an inverse view-projection
+            // matrix, where mediump loses enough precision to make the grid
+            // floor visibly swim as the camera moves.
+            src = injectAfterVersion(std::move(src),
+                                     wantsHighp ? "precision highp float;\n"
+                                                : "precision mediump float;\n");
         }
 #else
         (void)isFragment;
+        (void)wantsHighp;
 #endif
         return src;
+    }
+
+    // The quality level is compiled in rather than branched on. A uniform
+    // branch in a fullscreen pass is evaluated per pixel on hardware that has
+    // to run both sides anyway; a #define costs nothing at runtime.
+    std::string qualityDefines(editor::Quality q)
+    {
+        switch (q)
+        {
+        case editor::Quality::Low:
+            return "#define QUALITY_LOW 1\n";
+        case editor::Quality::Medium:
+            return "#define QUALITY_MEDIUM 1\n";
+        case editor::Quality::High:
+        default:
+            return "#define QUALITY_HIGH 1\n";
+        }
     }
 
     unsigned int compileShader(unsigned int type, const char *src)
@@ -147,11 +186,17 @@ bool PostFX::createShaders()
     if (mShadersReady)
         return true;
 
-    std::string vsrc = adjustForGLES(readShaderFile("shaders/fullscreen_vert.glsl"), false);
-    std::string skySrc = adjustForGLES(readShaderFile("shaders/sky_vaporwave_frag.glsl"), true);
-    std::string extractSrc = adjustForGLES(readShaderFile("shaders/bloom_extract_frag.glsl"), true);
-    std::string blurSrc = adjustForGLES(readShaderFile("shaders/bloom_blur_frag.glsl"), true);
-    std::string compositeSrc = adjustForGLES(readShaderFile("shaders/bloom_composite_frag.glsl"), true);
+    const std::string defines = qualityDefines(mQuality);
+    auto loadFrag = [&defines](const char *path, bool wantsHighp) {
+        return injectAfterVersion(adjustForGLES(readShaderFile(path), true, wantsHighp), defines);
+    };
+
+    std::string vsrc = adjustForGLES(readShaderFile("shaders/fullscreen_vert.glsl"), false, false);
+    // Only the sky shader needs highp — it reconstructs world space per pixel.
+    std::string skySrc = loadFrag("shaders/sky_vaporwave_frag.glsl", true);
+    std::string extractSrc = loadFrag("shaders/bloom_extract_frag.glsl", false);
+    std::string blurSrc = loadFrag("shaders/bloom_blur_frag.glsl", false);
+    std::string compositeSrc = loadFrag("shaders/bloom_composite_frag.glsl", false);
 
     if (vsrc.empty() || skySrc.empty() || extractSrc.empty() || blurSrc.empty() || compositeSrc.empty())
         return false;
@@ -180,12 +225,27 @@ static void allocColorTex(unsigned int &tex, int w, int h)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
-bool PostFX::ensure(int width, int height)
+bool PostFX::ensure(int width, int height, editor::Quality quality)
 {
     if (width < 2)
         width = 2;
     if (height < 2)
         height = 2;
+
+    if (quality != mQuality)
+    {
+        // Drop the programs so createShaders rebuilds them with the new
+        // #defines, and force the FBO path below to rerun for the new bloom
+        // scale.
+        if (mSkyProgram) glDeleteProgram(mSkyProgram);
+        if (mExtractProgram) glDeleteProgram(mExtractProgram);
+        if (mBlurProgram) glDeleteProgram(mBlurProgram);
+        if (mCompositeProgram) glDeleteProgram(mCompositeProgram);
+        mSkyProgram = mExtractProgram = mBlurProgram = mCompositeProgram = 0;
+        mShadersReady = false;
+        mQuality = quality;
+        mWidth = mHeight = 0;
+    }
 
     if (!createShaders())
         return false;
@@ -196,8 +256,14 @@ bool PostFX::ensure(int width, int height)
     destroyResources();
     mWidth = width;
     mHeight = height;
-    mBloomW = std::max(2, width / 2);
-    mBloomH = std::max(2, height / 2);
+
+    // Bloom runs at a fraction of scene resolution — it is a wide blur, so the
+    // detail is thrown away regardless, and every pass is fill-rate bound.
+    // Quarter resolution on Low is a 4x cut in the pixels the blur touches,
+    // which is the single largest saving available to a weak GPU.
+    const int bloomDiv = (quality == editor::Quality::Low) ? 4 : 2;
+    mBloomW = std::max(2, width / bloomDiv);
+    mBloomH = std::max(2, height / bloomDiv);
 
     // Scene FBO
     glGenFramebuffers(1, &mSceneFbo);
@@ -261,7 +327,8 @@ void PostFX::drawFullscreenTriangle()
 
 void PostFX::drawBackground(const glm::mat4 &view, const glm::mat4 &projection,
                             const glm::vec3 &camPos,
-                            const editor::VFX &vfx)
+                            const editor::VFX &vfx,
+                            const BlastLights &lights)
 {
     if (!mShadersReady)
         return;
@@ -324,6 +391,20 @@ void PostFX::drawBackground(const glm::mat4 &view, const glm::mat4 &projection,
     float aspect = static_cast<float>(mWidth) / static_cast<float>(std::max(1, mHeight));
     glUniform1f(glGetUniformLocation(mSkyProgram, "uAspect"), aspect);
 
+    // Explosion lights on the grid floor. Only uploaded when the grid is
+    // actually drawn — it is the only thing in this shader that consumes them.
+    int lightCount = 0;
+    if (vfx.gridEnabled && lights.count > 0 && lights.posRadius && lights.colorIntensity)
+        lightCount = std::min(lights.count, editor::kMaxBlastLights);
+    glUniform1i(glGetUniformLocation(mSkyProgram, "uBlastLightCount"), lightCount);
+    if (lightCount > 0)
+    {
+        glUniform4fv(glGetUniformLocation(mSkyProgram, "uBlastLightPos"),
+                     lightCount, &lights.posRadius[0][0]);
+        glUniform4fv(glGetUniformLocation(mSkyProgram, "uBlastLightColor"),
+                     lightCount, &lights.colorIntensity[0][0]);
+    }
+
     // Draw behind scene geometry: don't write depth, don't test depth.
     GLboolean depthWasOn = glIsEnabled(GL_DEPTH_TEST);
     glDisable(GL_DEPTH_TEST);
@@ -368,7 +449,17 @@ void PostFX::compositeTo(unsigned int targetFbo, int targetX, int targetY,
         unsigned int readTex = mBloomColorA;
         unsigned int writeFbo = mBloomFboB;
         unsigned int writeTex = mBloomColorB;
-        for (int i = 0; i < vfx.bloomIterations; ++i)
+        // Each iteration is two more fullscreen passes over the bloom buffer,
+        // so this is the cheapest single knob for a struggling GPU. Low is
+        // capped hard; the blur is already wider per pass at quarter res, so
+        // the result stays recognisable rather than looking like a different
+        // effect.
+        int iterations = vfx.bloomIterations;
+        if (mQuality == editor::Quality::Low)
+            iterations = std::min(iterations, 2);
+        else if (mQuality == editor::Quality::Medium)
+            iterations = std::min(iterations, 3);
+        for (int i = 0; i < iterations; ++i)
         {
             // Horizontal
             glBindFramebuffer(GL_FRAMEBUFFER, writeFbo);

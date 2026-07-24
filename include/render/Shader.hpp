@@ -28,6 +28,9 @@ public:
     void setFragmentColor(glm::vec4 color);
     void setVec3(const char *name, const glm::vec3 &v);
     void setVec4(const char *name, const glm::vec4 &v);
+    // Upload `count` consecutive vec4s to a uniform array. `name` is the array's
+    // base name ("uFoo"), not an indexed element.
+    void setVec4Array(const char *name, const glm::vec4 *v, int count);
     void setVec2(const char *name, const glm::vec2 &v);
     void setFloat(const char *name, float v);
     void setInt(const char *name, int v);

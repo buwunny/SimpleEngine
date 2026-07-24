@@ -219,6 +219,16 @@
             right: 116px;
             bottom: calc(92px + env(safe-area-inset-bottom, 0px));
         }
+
+        /* Settings gear. Small and out of the way at the top — it opens a modal
+           menu, so unlike the action buttons it is never pressed in a hurry. */
+        #menuBtn {
+            width: 46px;
+            height: 46px;
+            right: 20px;
+            top: calc(20px + env(safe-area-inset-top, 0px));
+            font-size: 20px;
+        }
     </style>
 </head>
 
@@ -234,7 +244,7 @@
         <div id="startOverlay" class="overlay" style="display:none;">
             <div>
                 <div>Click to play</div>
-                <div class="hint">WASD to move, mouse to look, Space to jump, Tab to release cursor</div>
+                <div class="hint">WASD to move, mouse to look, Space to jump, Esc for settings, Tab to release cursor</div>
             </div>
         </div>
         <div id="touchControls">
@@ -243,6 +253,7 @@
             </div>
             <button id="jumpBtn" class="touch-btn" type="button">JUMP</button>
             <button id="shootBtn" class="touch-btn" type="button">SHOOT</button>
+            <button id="menuBtn" class="touch-btn" type="button">&#9881;</button>
         </div>
         <div id="gateOverlay" class="overlay">
             <div class="panel">
@@ -532,7 +543,7 @@
                 return null;
 
             // GLFW key codes (ASCII for printable keys; 340 = left shift).
-            var K = { W: 87, A: 65, S: 83, D: 68, SPACE: 32, SHIFT: 340, C: 67 };
+            var K = { W: 87, A: 65, S: 83, D: 68, SPACE: 32, SHIFT: 340, C: 67, ESC: 256 };
             var RADIUS = 56;    // px of travel for full deflection
             var DEAD = 0.28;    // fraction of travel ignored before a key engages
             var SPRINT = 0.92;  // beyond this, hold shift too
@@ -646,6 +657,12 @@
             }
             bindButton(document.getElementById('jumpBtn'), K.SPACE);
             bindButton(document.getElementById('shootBtn'), K.C);
+            // The gear presses Escape, which is what opens the engine's own
+            // settings overlay. Once it is up, the stick moves the selection
+            // (it presses W/S) and JUMP confirms (it presses Space) — so the
+            // menu needs no touch controls of its own, and there is only one
+            // menu implementation to maintain across desktop, web and phone.
+            bindButton(document.getElementById('menuBtn'), K.ESC);
 
             releaseStick();
             window.addEventListener('resize', function () {

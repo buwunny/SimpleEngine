@@ -29,20 +29,33 @@ public:
     ~PostFX();
 
     // Lazily compile shaders and create FBOs sized to (width, height). Safe
-    // to call every frame — work is only done when the size changes or on
-    // first call. Returns true on success.
-    bool ensure(int width, int height);
+    // to call every frame — work is only done when the size, or the quality
+    // level the shaders were compiled for, has changed. Returns true on success.
+    bool ensure(int width, int height, editor::Quality quality = editor::Quality::High);
 
     // Bind the internal scene FBO and clear color/depth. Caller then draws
     // sky (drawBackground), scene geometry, etc., into this FBO.
     void beginSceneCapture();
 
+    // One frame's worth of explosion lights, gathered by the caller from the
+    // live BlastVfx entities (see ecs::collectBlastLights). PostFX only uploads
+    // them; the arrays stay owned by the caller and need only outlive the call.
+    struct BlastLights
+    {
+        const glm::vec4 *posRadius = nullptr;      // xyz = position, w = radius
+        const glm::vec4 *colorIntensity = nullptr; // rgb = colour, a = brightness
+        int count = 0;
+    };
+
     // Render the vaporwave sky+sun+grid full-screen pass into the currently
     // bound framebuffer. Expects the scene FBO bound and depth-write off; the
-    // shader writes vec4(color, 1.0) at far plane.
+    // shader writes vec4(color, 1.0) at far plane. `lights` illuminates the grid
+    // floor and is ignored when the grid is off; pass a default-constructed
+    // BlastLights for none.
     void drawBackground(const glm::mat4 &view, const glm::mat4 &projection,
                         const glm::vec3 &camPos,
-                        const editor::VFX &vfx);
+                        const editor::VFX &vfx,
+                        const BlastLights &lights);
 
     // After the scene is in the internal FBO, run bloom and composite into
     // the target framebuffer at the given viewport. Pass targetFbo = 0 for
@@ -87,6 +100,10 @@ private:
     unsigned int mCompositeProgram = 0;
 
     bool mShadersReady = false;
+    // The level the current programs and bloom buffers were built for. Changing
+    // quality means recompiling every post-process shader and resizing the
+    // bloom chain, so it is tracked rather than read per frame.
+    editor::Quality mQuality = editor::Quality::High;
 };
 
 #endif // POSTFX_HPP

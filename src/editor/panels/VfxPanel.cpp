@@ -87,10 +87,33 @@ namespace editor
             ImGui::EndDisabled();
         }
 
+        if (ImGui::CollapsingHeader("Explosion light", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            ImGui::Checkbox("Explosions cast light", &v.explosionLightEnabled);
+            ImGui::BeginDisabled(!v.explosionLightEnabled);
+            ImGui::SliderFloat("Brightness", &v.explosionLightIntensity, 0.0f, 8.0f);
+            ImGui::SliderFloat("Reach (x blast radius)", &v.explosionLightReach, 0.5f, 6.0f);
+            ImGui::ColorEdit3("Light color", &v.explosionLightColor.x);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("Lights nearby geometry and the grid floor.");
+        }
+
         if (ImGui::CollapsingHeader("Wireframe fill"))
         {
             ImGui::Checkbox("Solid black fill behind wireframes", &v.wireframeFill);
             ImGui::TextDisabled("Off lets the sky show through every object.");
+        }
+
+        if (ImGui::CollapsingHeader("Quality", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            // Mirrors the standalone game's settings menu. Changing this
+            // recompiles every post-process shader and resizes the bloom chain,
+            // so it stutters for a frame — that is the switch working, not a bug.
+            int q = static_cast<int>(v.quality);
+            if (ImGui::Combo("Level", &q, "Low\0Medium\0High\0"))
+                v.quality = static_cast<Quality>(q);
+            ImGui::TextDisabled("Low: quarter-res bloom, fewer/cheaper passes.");
+            ImGui::TextDisabled("Preview how the game runs on a phone.");
         }
 
         ImGui::End();

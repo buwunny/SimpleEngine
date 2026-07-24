@@ -25,12 +25,25 @@ void main()
     if (uTonemap == 1)
     {
         col = tonemap(col);
+#ifdef QUALITY_LOW
+        // sqrt is gamma 2.0 rather than 2.2 — a shade brighter in the mids and
+        // visually very close, but a single instruction against a full pow().
+        col = sqrt(col);
+#else
         col = pow(col, vec3(1.0 / 2.2));
+#endif
     }
 
     if (uScanlines == 1)
     {
+#ifdef QUALITY_LOW
+        // A triangle wave off fract() instead of sin(). At one cycle per pixel
+        // row the difference is imperceptible, and it drops a transcendental
+        // from a fullscreen pass.
+        float line = abs(fract(vUV.y * uOutputSize.y * 0.5) * 2.0 - 1.0) * 2.0 - 1.0;
+#else
         float line = sin(vUV.y * uOutputSize.y * 3.14159);
+#endif
         float dark = mix(1.0, 0.5 + 0.5 * line, uScanlineStrength);
         col *= dark;
     }

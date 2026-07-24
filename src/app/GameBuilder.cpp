@@ -52,6 +52,9 @@ R"html(<!doctype html>
         .touch-btn.held{background:rgba(255,255,255,0.3);opacity:1;}
         #jumpBtn{right:26px;bottom:calc(34px + env(safe-area-inset-bottom,0px));}
         #shootBtn{right:116px;bottom:calc(92px + env(safe-area-inset-bottom,0px));}
+        /* Settings gear. Small and out of the way at the top — it opens a modal
+           menu, so unlike the action buttons it is never pressed in a hurry. */
+        #menuBtn{width:46px;height:46px;right:20px;top:calc(20px + env(safe-area-inset-top,0px));font-size:20px;}
     </style>
 </head>
 <body>
@@ -66,13 +69,14 @@ R"html(<!doctype html>
         <div id="startOverlay" class="overlay" style="display:none;">
             <div>
                 <div>Click to play</div>
-                <div class="hint">WASD to move, mouse to look, Space to jump, Tab to release cursor</div>
+                <div class="hint">WASD to move, mouse to look, Space to jump, Esc for settings, Tab to release cursor</div>
             </div>
         </div>
         <div id="touchControls">
             <div id="stick"><div id="stickKnob"></div></div>
             <button id="jumpBtn" class="touch-btn" type="button">JUMP</button>
             <button id="shootBtn" class="touch-btn" type="button">SHOOT</button>
+            <button id="menuBtn" class="touch-btn" type="button">&#9881;</button>
         </div>
     </div>
     <script>
@@ -117,7 +121,7 @@ R"html(<!doctype html>
             try{coarse=window.matchMedia('(pointer: coarse)').matches;}catch(e){}
             if(!coarse||!(navigator.maxTouchPoints>0||'ontouchstart' in window))return null;
             // GLFW key codes (ASCII for printable keys; 340 = left shift).
-            var K={W:87,A:65,S:83,D:68,SPACE:32,SHIFT:340,C:67};
+            var K={W:87,A:65,S:83,D:68,SPACE:32,SHIFT:340,C:67,ESC:256};
             var RADIUS=56,DEAD=0.28,SPRINT=0.92;
             // The engine turns a delta into degrees as delta*5 (PlayerInputSystem)
             // *0.1 (Camera::sensitivity), so this is ~0.55 deg per CSS px dragged.
@@ -182,6 +186,12 @@ R"html(<!doctype html>
             }
             bindButton(document.getElementById('jumpBtn'),K.SPACE);
             bindButton(document.getElementById('shootBtn'),K.C);
+            // The gear presses Escape, which is what opens the engine's own
+            // settings overlay. Once it is up, the stick moves the selection
+            // (it presses W/S) and JUMP confirms (it presses Space) — so the
+            // menu needs no touch controls of its own, and there is only one
+            // menu implementation to maintain across desktop, web and phone.
+            bindButton(document.getElementById('menuBtn'),K.ESC);
             releaseStick();
             window.addEventListener('resize',function(){if(moveId===null)releaseStick();});
             // No pointer lock exists on a phone, so open the gate mouse-look sits behind.

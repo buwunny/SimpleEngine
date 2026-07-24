@@ -13,6 +13,33 @@
 // aliases it as editor::Context::VFX.
 namespace editor
 {
+    // How much the renderer is allowed to spend per pixel. This is not a
+    // cosmetic switch: PostFX compiles a different variant of every
+    // post-process shader per level and sizes the bloom chain from it, so
+    // changing it recompiles. Low exists for phones and integrated GPUs, where
+    // the fullscreen passes are fill-rate bound and the difference is the gap
+    // between 30 and 60 fps.
+    enum class Quality
+    {
+        Low = 0,
+        Medium = 1,
+        High = 2,
+    };
+
+    // Most blast lights that can affect a pixel at once. Kept small and fixed
+    // because it sets the loop bound in two fragment shaders; anything past
+    // this many simultaneous explosions simply isn't lit, which is invisible in
+    // practice — a fifth blast within range of the same pixel is already lost
+    // in the glare of the other four.
+    inline constexpr int kMaxBlastLights = 4;
+
+    // The shaders declare their uniform arrays with a literal, since GLSL can't
+    // see this header. If you raise the limit here, raise MAX_BLAST_LIGHTS in
+    // both src/shaders/fragment.glsl and src/shaders/sky_vaporwave_frag.glsl to
+    // match — otherwise the extra lights are uploaded and silently ignored.
+    static_assert(kMaxBlastLights == 4,
+                  "MAX_BLAST_LIGHTS in fragment.glsl and sky_vaporwave_frag.glsl must match");
+
     struct VFX
     {
         // Every visual feature is gated by its own *Enabled flag so the
@@ -70,6 +97,25 @@ namespace editor
         // Retro CRT overlay
         bool scanlinesEnabled = false;
         float scanlineStrength = 0.15f;
+
+        // Explosions cast light. Each live blast becomes a point light that
+        // brightens nearby wireframe lines and the grid floor beneath it, on
+        // the same fade curve as the shockwave ring that draws it (see
+        // ecs::BlastVfx). Costs a short bounded loop per pixel in two shaders
+        // and nothing at all while no blast is alive.
+        bool explosionLightEnabled = false;
+        // Multiplies a lit line's own colour, so this is a gain and not an
+        // absolute brightness: past ~2 everything inside the radius clips to
+        // white and the blast stops reading as a light and starts reading as a
+        // flash of nothing.
+        float explosionLightIntensity = 1.5f;
+        // Multiplies the blast's own radius to get the light's reach. Light
+        // spills further than the shockwave that produced it, or the effect
+        // reads as the ring being the only thing that happened.
+        float explosionLightReach = 2.0f;
+        glm::vec3 explosionLightColor = glm::vec3(1.0f, 0.62f, 0.22f);
+
+        Quality quality = Quality::High;
     };
 }
 
