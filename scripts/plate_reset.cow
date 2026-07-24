@@ -1,0 +1,85 @@
+// plate_reset.cow - a pressure plate that puts the whole scene back.
+//
+// One of these sits at each corner of the playable area, deliberately away from
+// everything else: it throws away every cube you have spawned and every cow you
+// have fired, so it should take a walk to reach rather than being something you
+// blunder onto mid-game.
+//
+// Same mechanism as button.cow; only the block marked ACTION differs.
+//
+// reset_scene() is *deferred* by the engine rather than run on the spot. It
+// destroys every entity in the scene, and this script is running inside the
+// iteration over those entities — including this plate. The engine carries it
+// out once scripts have finished for the frame, so by the time the world is
+// rebuilt nothing is mid-update. Note that this plate does not survive its own
+// press: it is destroyed and recreated from the scene file like everything
+// else, which is why nothing below tries to keep state across it.
+
+let press_depth = 0.18   // how far the plate sinks when stepped on
+let travel = 2.0         // slower than the others: a reset should feel weighty
+let cooldown = 3.0       // seconds before it can fire again
+let hold = 0.2           // grace after contact is lost before it counts as released
+
+let idle_r = 1.0
+let idle_g = 0.75
+let idle_b = 0.1
+let live_r = 1.0
+let live_g = 1.0
+let live_b = 1.0
+
+let rest_y = 0
+let sink = 0
+let ready_at = 0
+let lit_until = 0
+let pressed_until = 0
+
+on start() {
+    rest_y = self_y()
+    self_set_color(idle_r, idle_g, idle_b, 1)
+    // Taller offset and a bigger label than the other plates: these are meant
+    // to be spotted from the middle of the map, and the nametag system fades
+    // labels with distance, so they need the extra size to survive the trip.
+    self_set_nametag("RESET SCENE", 2.2, 0.6, 1.0, 0.8, 0.2)
+}
+
+on update(dt) {
+    let touching = self_contact_above()
+    if (touching) {
+        pressed_until = time() + hold
+    }
+    // Latched — see the long note in button.cow for why reading the contact
+    // directly makes the plate oscillate instead of pressing.
+    let pressed = time() < pressed_until
+
+    let target = 0
+    if (pressed) {
+        target = press_depth
+    }
+    let step = travel * dt
+    if (sink < target) {
+        sink = sink + step
+        if (sink > target) { sink = target }
+    }
+    if (sink > target) {
+        sink = sink - step
+        if (sink < target) { sink = target }
+    }
+    self_set_pos(self_x(), rest_y - sink, self_z())
+
+    if (pressed and sink >= press_depth and time() >= ready_at) {
+        // ---- ACTION ----
+        // Rebuilds the world as it was loaded and returns the player to spawn.
+        reset_scene()
+        // ---- end ACTION ----
+
+        pressed_until = 0
+        ready_at = time() + cooldown
+        lit_until = time() + 0.4
+        self_set_color(live_r, live_g, live_b, 1)
+        print("plate: scene reset")
+    }
+
+    if (time() > lit_until) {
+        self_set_color(idle_r, idle_g, idle_b, 1)
+    }
+}

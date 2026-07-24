@@ -198,6 +198,9 @@ These require the object to have a Rigidbody (mass > 0).
 | `self_on_ground()` | `true` if a short ray straight down hits something (jump/ground check) |
 | `self_set_friction(f)` | Set this body's friction coefficient (`0` = frictionless) |
 | `self_collided()` | `true` if this object is currently touching anything, any direction |
+| `self_contact_above()` | The object resting on top of this one, or `null` — see below |
+| `self_set_nametag(text, offset, size, r, g, b)` | Float a label above this object; empty text removes it |
+| `reset_scene()` | Rebuild the world as it was loaded and return the player to spawn |
 | `self_explode(radius, speed, up_bias, spin)` | Detonate at this object's position — see below |
 
 ```
@@ -207,6 +210,51 @@ on update(dt) {
     }
 }
 ```
+
+### Pressure plates
+
+`self_contact_above()` returns a **handle**, not a `true`/`false`. `null` is
+already falsy, so it reads the same way in an `if` while also handing you the
+thing standing on the object — which is usually what you want:
+
+```
+on update(dt) {
+    let rider = self_contact_above()
+    if (rider) {
+        rigidbody_of(rider).vy = 24    // a jump pad
+    }
+}
+```
+
+Reach for it instead of `self_collided()` whenever the object sits on
+something. `self_collided()` is true for a touch in *any* direction, so a plate
+resting on the floor reads as permanently pressed by the ground under it;
+`self_contact_above()` only counts contacts pushing down on the top face, and
+only from objects that can move — static world geometry is never a load, so a
+plate that sinks into its own floor can't hold itself down.
+
+Give a plate **mass 0**. A dynamic one gets shoved through the floor by whatever
+lands on it.
+
+One caveat worth knowing: the plate moving down is what breaks the contact
+holding it down — it descends immediately while whatever is on it has to be
+accelerated by gravity to follow. Read the contact directly and the plate
+oscillates a centimetre or two below rest without ever pressing. Latch it for a
+fraction of a second instead; all three scripts below show the pattern.
+
+The scene ships three plates, each self-contained so you can copy one and
+rewrite only its action:
+
+| Script | What pressing it does |
+|--------|-----------------------|
+| `scripts/button.cow` | Launches whatever pressed it straight up |
+| `scripts/plate_spawn.cow` | Drops a cube of random size and colour beside itself |
+| `scripts/plate_reset.cow` | Calls `reset_scene()` |
+
+`reset_scene()` is **deferred** by the engine: it destroys every entity, and the
+call necessarily comes from a script running inside the iteration over them, so
+it is carried out once scripts have finished for the frame. The plate that
+pressed it does not survive — it is rebuilt from the scene like everything else.
 
 ### Explosions
 

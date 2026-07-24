@@ -1,0 +1,112 @@
+// button.cow - a pressure plate. Attach it to a Cube with mass 0 and it sinks
+// under anything that lands on it, then launches whatever pressed it.
+//
+// Stand on it, or drop a cow on it, and it fires. Because the thing it launches
+// is the thing that pressed it, the plate clears itself and pops back up — no
+// timer, and no way to get stuck holding it down.
+//
+// The whole behaviour rests on one builtin:
+//   self_contact_above() -> the object resting on top of this one, or null
+// which is a handle rather than a true/false, so it doubles as the test in an
+// `if` and as the way to reach the presser. Note that self_collided() is the
+// wrong tool here: it is true for *any* touch, so a plate sitting on the floor
+// would read as permanently pressed by the ground beneath it.
+//
+// The plate must have mass 0. A dynamic one would be shoved through the floor
+// by whatever landed on it, and its own weight would fight the animation below.
+
+// Keep press_depth under the plate's own height or it sinks out of sight: the
+// one in scenes/scene.json is 0.3 units thick and sits on the floor, so 0.18
+// leaves a visible lip when fully depressed.
+let press_depth = 0.18   // how far the plate sinks when stepped on
+let travel = 2.5         // metres per second the plate moves
+let launch = 50          // upward speed handed to whatever pressed it
+let cooldown = 0.8       // seconds before it can fire again
+let hold = 0.2           // grace after contact is lost before it counts as released
+
+let idle_r = 0.9         // colour when resting
+let idle_g = 0.25
+let idle_b = 0.35
+let live_r = 0.35        // colour in the moment it fires
+let live_g = 1.0
+let live_b = 0.55
+
+let rest_y = 0           // the height it was placed at, captured on start
+let sink = 0             // how far below rest_y it currently sits
+let ready_at = 0         // time() before which it will not fire again
+let lit_until = 0        // time() until which it shows the fired colour
+let pressed_until = 0    // time() up to which it still counts as held down
+let rider = null         // the last thing seen standing on it
+
+on start() {
+    rest_y = self_y()
+    self_set_color(idle_r, idle_g, idle_b, 1)
+    // Floating label, drawn by the same nametag system that labels players in
+    // multiplayer: billboarded, faded with distance, readable from across the
+    // map. Sits well above the plate so it clears whatever is standing on it.
+    self_set_nametag("LAUNCH PAD", 1.6, 0.42, 1.0, 0.55, 0.2)
+}
+
+on update(dt) {
+    let touching = self_contact_above()
+    if (touching) {
+        rider = touching
+        pressed_until = time() + hold
+    }
+
+    // The press is *latched* for a moment rather than read directly from the
+    // contact, because the plate moving down is exactly what breaks the contact
+    // holding it down: the plate descends at `travel` immediately, while
+    // whatever is resting on it has to be accelerated by gravity and takes a
+    // tenth of a second to catch up. Read raw, contact flickers off every time
+    // the plate moves, the plate springs back, and it oscillates a couple of
+    // centimetres below rest forever without ever reaching its full depth.
+    let pressed = time() < pressed_until
+
+    // Sink while held, rise when clear. Moving at a fixed rate rather than
+    // snapping is what makes it read as a mechanism being pushed rather than
+    // the plate teleporting between two heights.
+    let target = 0
+    if (pressed) {
+        target = press_depth
+    }
+    let step = travel * dt
+    if (sink < target) {
+        sink = sink + step
+        if (sink > target) { sink = target }
+    }
+    if (sink > target) {
+        sink = sink - step
+        if (sink < target) { sink = target }
+    }
+    self_set_pos(self_x(), rest_y - sink, self_z())
+
+    // Fire only once the plate has travelled its full depth, so there is a
+    // beat between landing on it and being thrown — a plate that fired on the
+    // first frame of contact would launch you before you saw it move.
+    if (pressed and sink >= press_depth and time() >= ready_at) {
+        // Prefer whatever is touching right now; fall back to the last thing
+        // seen, since the latch above means we may be mid-flicker.
+        let target_obj = touching
+        if (not target_obj) {
+            target_obj = rider
+        }
+        let rb = rigidbody_of(target_obj)
+        if (rb) {
+            // Set the velocity rather than adding to it: whatever it was doing
+            // on the way down should not decide how high it goes back up.
+            rb.vy = launch
+        }
+        // Drop the latch so the plate rises immediately instead of staying
+        // down for the rest of the grace window after the rider is gone.
+        pressed_until = 0
+        ready_at = time() + cooldown
+        lit_until = time() + 0.25
+        self_set_color(live_r, live_g, live_b, 1)
+        print("button: launched")
+    }
+
+    if (time() > lit_until) {
+        self_set_color(idle_r, idle_g, idle_b, 1)
+    }
+}

@@ -73,6 +73,30 @@ public:
     using ExplosionObserver = std::function<void(const glm::vec3 &, const PhysicsWorld::BlastParams &)>;
     void setExplosionObserver(ExplosionObserver fn) { onExplosion_ = std::move(fn); }
 
+    // A script has asked for the world to be put back the way it started.
+    //
+    // Deferred rather than acted on immediately, because a reset destroys every
+    // entity in the scene and the request necessarily arrives from a script
+    // that is itself running inside the iteration over those entities — the
+    // plate would be pulling the floor out from under its own update. The owner
+    // of the frame loop consumes it once scripts are done.
+    void requestReset() { resetRequested_ = true; }
+
+    // Put the world back to the state it was loaded in.
+    //
+    // Restores from the JSON captured at load rather than re-reading the file,
+    // because an exported web game's scene arrives from localStorage and never
+    // exists on disk — forceReload() finds no file there and silently does
+    // nothing. Going through the captured copy also makes this a true reset to
+    // the starting state rather than to whatever the file says now.
+    void resetToInitial();
+    bool consumeResetRequest()
+    {
+        const bool r = resetRequested_;
+        resetRequested_ = false;
+        return r;
+    }
+
     void addPlayer(Camera *camera, const glm::mat4 &model, Window *window, PhysicsWorld &physics);
     ecs::Entity getPlayerEntity() const { return playerEntity_; }
     bool hasPlayer() const { return playerEntity_ != ecs::NullEntity && reg_.valid(playerEntity_); }
@@ -173,6 +197,8 @@ private:
     std::filesystem::file_time_type lastWriteTime_;
     PhysicsWorld *physicsWorld_ = nullptr;
     ExplosionObserver onExplosion_;
+    bool resetRequested_ = false;
+    std::string initialJson_; // the scene as loaded, for resetToInitial()
     std::chrono::steady_clock::time_point lastAutoReloadTime_ = std::chrono::steady_clock::time_point::min();
     std::chrono::milliseconds reloadDebounce_{500};
     static Scene *s_current;

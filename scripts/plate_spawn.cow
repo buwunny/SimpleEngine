@@ -1,0 +1,86 @@
+// plate_spawn.cow - a pressure plate that drops a random cube beside itself.
+//
+// Same mechanism as button.cow; only the block marked ACTION differs. The press
+// machinery is repeated in each plate rather than factored out because .cow has
+// no include and no way to parameterise a script per entity — and because a
+// plate you can read top to bottom is worth more here than a shared one you
+// cannot. To make a new kind of plate, copy one of these and rewrite ACTION.
+
+let press_depth = 0.18   // how far the plate sinks when stepped on
+let travel = 2.5         // metres per second the plate moves
+let cooldown = 1.5       // seconds before it can fire again
+let hold = 0.2           // grace after contact is lost before it counts as released
+
+let drop_height = 7      // how far above the plate a new cube appears
+let drop_offset = 3.5    // how far to the side, so it cannot land back on here
+let min_size = 0.4       // smallest cube it makes
+let max_size = 2.6       // largest
+
+let idle_r = 0.25
+let idle_g = 0.5
+let idle_b = 0.95
+let live_r = 0.6
+let live_g = 0.95
+let live_b = 1.0
+
+let rest_y = 0
+let sink = 0
+let ready_at = 0
+let lit_until = 0
+let pressed_until = 0
+
+on start() {
+    rest_y = self_y()
+    self_set_color(idle_r, idle_g, idle_b, 1)
+    self_set_nametag("CUBE DISPENSER", 1.6, 0.42, 0.5, 0.8, 1.0)
+}
+
+on update(dt) {
+    let touching = self_contact_above()
+    if (touching) {
+        pressed_until = time() + hold
+    }
+    // Latched — see the long note in button.cow for why reading the contact
+    // directly makes the plate oscillate instead of pressing.
+    let pressed = time() < pressed_until
+
+    let target = 0
+    if (pressed) {
+        target = press_depth
+    }
+    let step = travel * dt
+    if (sink < target) {
+        sink = sink + step
+        if (sink > target) { sink = target }
+    }
+    if (sink > target) {
+        sink = sink - step
+        if (sink < target) { sink = target }
+    }
+    self_set_pos(self_x(), rest_y - sink, self_z())
+
+    if (pressed and sink >= press_depth and time() >= ready_at) {
+        // ---- ACTION ----
+        // Random size via spawn_cube's 4th argument, which scales the collision
+        // hull at spawn rather than after, so the box the cube collides with is
+        // the box you can see. The colour is random already: spawn_cube gives
+        // every cube it makes a fresh one.
+        //
+        // Dropped off to one side on purpose. Straight overhead, the new cube
+        // lands back on the plate, presses it, and the dispenser feeds itself
+        // cubes until the frame rate gives out.
+        let size = min_size + random() * (max_size - min_size)
+        spawn_cube(self_x() + drop_offset, rest_y + drop_height, self_z(), size)
+        // ---- end ACTION ----
+
+        pressed_until = 0
+        ready_at = time() + cooldown
+        lit_until = time() + 0.25
+        self_set_color(live_r, live_g, live_b, 1)
+        print("plate: dispensed a cube")
+    }
+
+    if (time() > lit_until) {
+        self_set_color(idle_r, idle_g, idle_b, 1)
+    }
+}

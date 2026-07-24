@@ -144,6 +144,52 @@ void PhysicsWorld::applyRadialBlast(const btVector3 &center, const BlastParams &
     }
 }
 
+const btRigidBody *PhysicsWorld::contactAbove(const btRigidBody *body, float minNormalY) const
+{
+    if (!dynamicsWorld || !body)
+        return nullptr;
+
+    const btScalar touchMargin = 0.01f; // see hasContacts
+
+    btDispatcher *disp = dynamicsWorld->getDispatcher();
+    const int numManifolds = disp->getNumManifolds();
+    for (int i = 0; i < numManifolds; ++i)
+    {
+        const btPersistentManifold *manifold = disp->getManifoldByIndexInternal(i);
+        const btCollisionObject *b0 = manifold->getBody0();
+        const btCollisionObject *b1 = manifold->getBody1();
+        if (b0 != body && b1 != body)
+            continue;
+
+        const bool weAreA = (b0 == body);
+        const btCollisionObject *other = weAreA ? b1 : b0;
+
+        // Static world geometry never counts as resting on anything — it is the
+        // world, not a load. Skipping it is what stops a plate that sinks into
+        // its own floor from holding itself down: once its centre drops below
+        // the floor's collision box, that box is genuinely "above" the plate,
+        // the normal test passes, and the plate reads itself as permanently
+        // pressed and never rises again.
+        if (!other || other->isStaticObject())
+            continue;
+
+        // m_normalWorldOnB points from B toward A. Flip it when we are A, so
+        // the normal always points from us toward whatever we are touching —
+        // then a positive Y means that thing is above us.
+        const btScalar sign = weAreA ? btScalar(-1) : btScalar(1);
+
+        for (int p = 0; p < manifold->getNumContacts(); ++p)
+        {
+            const btManifoldPoint &pt = manifold->getContactPoint(p);
+            if (pt.getDistance() > touchMargin)
+                continue;
+            if (sign * pt.m_normalWorldOnB.y() >= minNormalY)
+                return btRigidBody::upcast(other);
+        }
+    }
+    return nullptr;
+}
+
 bool PhysicsWorld::hasContacts(const btRigidBody *body) const
 {
     if (!dynamicsWorld || !body)

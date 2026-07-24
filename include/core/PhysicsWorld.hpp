@@ -47,6 +47,16 @@ public:
     // testing manifold existence alone detonates a projectile just before impact.
     bool hasContacts(const btRigidBody *body) const;
 
+    // The body currently resting on `body`'s upper surface, or nullptr.
+    //
+    // Distinct from hasContacts because "is anything touching me" is useless for
+    // anything that sits on the floor — a pressure plate would report a press
+    // forever from the ground under it. This filters by contact normal instead:
+    // only contacts pushing down onto the top face count. `minNormalY` is the
+    // cosine of how far from straight up a contact may be and still count, so
+    // 1.0 is dead-on and 0.5 allows 60 degrees.
+    const btRigidBody *contactAbove(const btRigidBody *body, float minNormalY = 0.5f) const;
+
 private:
     // True if static world geometry blocks the straight line from `from` to
     // `to`, which weakens (never cancels — see applyRadialBlast) the push that

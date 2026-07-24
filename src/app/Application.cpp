@@ -46,6 +46,10 @@ static EM_BOOL app_mousemove_callback(int, const EmscriptenMouseEvent *e, void *
 }
 #endif
 
+// Where the player starts, and where reset_scene() puts them back. One
+// definition so the two can't drift apart.
+static const glm::vec3 kPlayerSpawn(0.0f, 3.0f, 10.0f);
+
 Application::Application()
 {
 }
@@ -166,12 +170,12 @@ void Application::init()
         scene->populateDefault();
     scene->addRigidBodiesToWorld(*physics);
 
-    scene->addPlayer(camera, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, 10.0f)), window, *physics);
+    scene->addPlayer(camera, glm::translate(glm::mat4(1.0f), kPlayerSpawn), window, *physics);
     if (scene->hasPlayer())
         scene->registry().get<ecs::Identity>(scene->getPlayerEntity()).scriptPaths = {"scripts/player_movement.cow", "scripts/shoot_cow.cow"};
 
     // Ensure camera is positioned to match the player's initial transform on web builds
-    camera->setPosition(glm::vec3(0.0f, 3.0f, 10.0f));
+    camera->setPosition(kPlayerSpawn);
 
     shader = new Shader("./shaders/vertex.glsl", "./shaders/fragment.glsl");
     postfx = new PostFX();
@@ -313,6 +317,7 @@ void Application::tick()
 
             ecs::playerInputSystem(scene->registry(), window, physics, delta);
         }
+        applyPendingReset();
 
         glm::mat4 view = glm::lookAt(camera->getPosition(), camera->getPosition() + camera->getFront(), camera->getUp());
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 10000.0f);
@@ -400,6 +405,7 @@ void Application::tick()
         // editor panels doesn't drive the player.
         bool sampleInput = scene->hasPlayer() && (!uiCapturing || allowGameInput);
         advanceSim(delta, sampleInput);
+        applyPendingReset();
     }
 
     if (testingMode && scene->hasPlayer() && (!uiCapturing || allowGameInput))
@@ -701,6 +707,42 @@ void Application::advanceSim(float frameDelta, bool sampleLocalInput)
             netClient_->update(static_cast<float>(FIXED_DT));
 #endif
         simAccumulator -= FIXED_DT;
+    }
+}
+
+// A plate (or any script) called reset_scene(). Acted on here rather than where
+// it was requested, because a reset destroys every entity in the scene and the
+// request comes from a script running inside the iteration over them.
+void Application::applyPendingReset()
+{
+    if (!scene || !scene->consumeResetRequest())
+        return;
+
+    // loadFromJSON deliberately spares the player entity and rebuilds
+    // everything else, so the world goes back to how it was authored while the
+    // body the camera is attached to survives.
+    scene->resetToInitial();
+    reloadScripts();
+
+    // Put the player back at the spawn too — a "reset" that rebuilt the world
+    // but left you wherever you were standing is only half of one. Velocity is
+    // cleared as well, or you arrive still carrying the fall that got you here.
+    if (scene->hasPlayer())
+    {
+        if (auto *p = scene->registry().try_get<ecs::Physics>(scene->getPlayerEntity()); p && p->body)
+        {
+            btTransform xf;
+            xf.setIdentity();
+            xf.setOrigin(btVector3(kPlayerSpawn.x, kPlayerSpawn.y, kPlayerSpawn.z));
+            p->body->setWorldTransform(xf);
+            if (p->motion)
+                p->motion->setWorldTransform(xf);
+            p->body->setLinearVelocity(btVector3(0, 0, 0));
+            p->body->setAngularVelocity(btVector3(0, 0, 0));
+            p->body->activate(true);
+        }
+        if (camera)
+            camera->setPosition(kPlayerSpawn);
     }
 }
 

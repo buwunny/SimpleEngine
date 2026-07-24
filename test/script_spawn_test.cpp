@@ -11,6 +11,8 @@
 //     (the regression: shoot_cow used to destroy the previous cow on every shot)
 //   * Scene::explode pushes bodies by a velocity change rather than a flat
 //     impulse, so the same blast is correctly tuned whatever the target weighs
+//   * a static, script-moved pressure plate (scripts/button.cow) detects what
+//     lands on it via self_contact_above, sinks, launches it, and rises again
 //   * scripts that spawn/attach/destroy during updateScripts() don't corrupt the
 //     iteration over the ScriptComponent pool
 
@@ -123,6 +125,147 @@ static void testShotIsCentred()
     phys.shape->getAabb(btTransform::getIdentity(), lo, hi);
     printf("  collider extent = %.3f m (cow.obj is 10.44 m at scale 1)\n", hi.x() - lo.x());
     CHECK(hi.x() - lo.x() < 1.2f);
+}
+
+// The pressure plate: scripts/button.cow driving a static cube. Covers the two
+// things a script-driven plate needs from the engine — knowing what is standing
+// on it, and being able to move itself while still colliding where it now is.
+static void testButton()
+{
+    PhysicsWorld physics;
+    Scene scene;
+    ecs::createPlane(scene.registry(), nullptr, 200, 200, glm::mat4(1.0f), glm::vec4(1.0f), 0.0f);
+
+    // Deliberately the exact plate from scenes/scene.json — non-uniformly
+    // scaled and sitting *on* the floor rather than a tidy unit cube floating
+    // in space. That is the configuration that exposed the plate holding itself
+    // down via its own floor, and a test that used a convenient shape instead
+    // would have gone on passing through it.
+    //
+    // Static, per the note in button.cow: a dynamic plate gets pushed through
+    // the floor by whatever lands on it.
+    glm::mat4 bm = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.15f, 0.0f)),
+                              glm::vec3(2.4f, 0.3f, 2.4f));
+    ecs::Entity button = ecs::createCube(scene.registry(), &physics, 1, bm,
+                                         glm::vec4(1.0f), 0.0f);
+    scene.registry().get<ecs::Identity>(button).scriptPaths = {"scripts/button.cow"};
+
+    // Something to drop on it, from well above.
+    ecs::Entity weight = ecs::createCube(scene.registry(), &physics, 1,
+                                         glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 4.0f, 0.0f)),
+                                         glm::vec4(1.0f), 1.0f);
+    scene.addRigidBodiesToWorld(physics);
+
+    ScriptHost host;
+    host.setContext(&scene, nullptr);
+    double t = 0.0;
+    host.setTime(t);
+    host.setDelta(0.0);
+    scene.loadScripts(host);
+    scene.startScripts(host);
+
+    auto buttonY = [&] { return scene.registry().get<ecs::Transform>(button).position.y; };
+    auto weightVY = [&] {
+        return scene.registry().get<ecs::Physics>(weight).body->getLinearVelocity().y();
+    };
+
+    const float restY = static_cast<float>(buttonY());
+    const float dt = 1.0f / 60.0f;
+
+    float lowest = restY;
+    float fastestUp = 0.0f;
+    bool fired = false;
+    bool roseAgain = false;
+    for (int i = 0; i < 180; ++i) // 3 s: fall, press, fire, rise
+    {
+        step(scene, physics, host, t, dt);
+        lowest = std::min(lowest, static_cast<float>(buttonY()));
+        fastestUp = std::max(fastestUp, weightVY());
+        if (weightVY() > 20.0f)
+            fired = true;
+        // Checked only after a launch, and only as "came back up at some point":
+        // the weight is thrown straight up, so it lands on the plate again and
+        // presses it a second time. Sampling the height at a fixed moment would
+        // be asking which half of that cycle 3 seconds happens to land in.
+        if (fired && std::fabs(static_cast<float>(buttonY()) - restY) < 0.01f)
+            roseAgain = true;
+    }
+
+    printf("  button: rest y=%.2f, sank to %.2f, launched the weight at %.1f m/s\n",
+           restY, lowest, fastestUp);
+
+    // It sank the full depth. The bar is most of press_depth rather than a
+    // twitch, because the failure this guards against is a plate that dips a
+    // frame's worth and springs straight back: moving down breaks the contact
+    // that is holding it down, so without the latch in button.cow it oscillates
+    // a couple of centimetres below rest and never fires.
+    CHECK(restY - lowest > 0.15f); // most of button.cow's press_depth
+    // ...and fired. The weight arrives falling, so any large positive vertical
+    // speed can only have come from the plate.
+    CHECK(fastestUp > 20.0f);
+    // ...and came back up once the weight was thrown clear.
+    CHECK(roseAgain);
+}
+
+// The other two plates from scenes/scene.json, on the same press mechanism:
+// one dispenses a cube, one resets the world. Both are checked through the real
+// scripts, and both also confirm the plate labelled itself via the nametag
+// system rather than needing the label authored into the scene.
+static void testOtherPlates(const char *script, const char *expectLabel,
+                            bool expectSpawn, bool expectReset)
+{
+    PhysicsWorld physics;
+    Scene scene;
+    ecs::createPlane(scene.registry(), nullptr, 200, 200, glm::mat4(1.0f), glm::vec4(1.0f), 0.0f);
+
+    glm::mat4 bm = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.15f, 0.0f)),
+                              glm::vec3(2.4f, 0.3f, 2.4f));
+    ecs::Entity plate = ecs::createCube(scene.registry(), &physics, 1, bm, glm::vec4(1.0f), 0.0f);
+    scene.registry().get<ecs::Identity>(plate).scriptPaths = {script};
+
+    ecs::Entity weight = ecs::createCube(scene.registry(), &physics, 1,
+                                         glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 4.0f, 0.0f)),
+                                         glm::vec4(1.0f), 1.0f);
+    scene.addRigidBodiesToWorld(physics);
+
+    ScriptHost host;
+    host.setContext(&scene, nullptr);
+    double t = 0.0;
+    host.setTime(t);
+    host.setDelta(0.0);
+    scene.loadScripts(host);
+    scene.startScripts(host);
+
+    // The label is set in on start(), so it must already be there.
+    const auto *tag = scene.registry().try_get<ecs::Nametag>(plate);
+    CHECK(tag != nullptr);
+    if (tag)
+        CHECK(tag->text == expectLabel);
+
+    const int before = static_cast<int>(scene.registry().view<ecs::Physics>().size());
+    const float restY = static_cast<float>(scene.registry().get<ecs::Transform>(plate).position.y);
+    float lowest = restY;
+    for (int i = 0; i < 120; ++i)
+    {
+        step(scene, physics, host, t, 1.0f / 60.0f);
+        lowest = std::min(lowest, static_cast<float>(scene.registry().get<ecs::Transform>(plate).position.y));
+    }
+    const int after = static_cast<int>(scene.registry().view<ecs::Physics>().size());
+
+    // Consumed rather than peeked, so the flag's clear-on-read is exercised too.
+    const bool askedForReset = scene.consumeResetRequest();
+
+    printf("  %-24s label='%s' sank %.2f m, bodies %d -> %d, reset=%s\n",
+           script, tag ? tag->text.c_str() : "?", restY - lowest, before, after,
+           askedForReset ? "yes" : "no");
+
+    CHECK(restY - lowest > 0.15f);          // it pressed
+    CHECK(askedForReset == expectReset);    // ...and asked (or didn't) for a reset
+    if (expectSpawn)
+        CHECK(after > before);              // a cube appeared
+    else
+        CHECK(after == before);             // and the other plate made nothing
+    (void)weight;
 }
 
 // Scene::explode's blast model: that its strength is set by distance alone and
@@ -337,6 +480,9 @@ int main()
     testShotIsCentred();
     testBlast();
     testRocketJump();
+    testButton();
+    testOtherPlates("scripts/plate_spawn.cow", "CUBE DISPENSER", true, false);
+    testOtherPlates("scripts/plate_reset.cow", "RESET SCENE", false, true);
 
     PhysicsWorld physics;
     Scene scene;

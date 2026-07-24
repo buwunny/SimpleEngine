@@ -81,6 +81,9 @@ void ScriptHost::bindBuiltins(cowscript::Script &script)
     script.setBuiltin("self_on_ground", [this](const std::vector<Value> &a) { return builtinSelfOnGround(a); });
     script.setBuiltin("self_set_friction", [this](const std::vector<Value> &a) { return builtinSelfSetFriction(a); });
     script.setBuiltin("self_collided", [this](const std::vector<Value> &a) { return builtinSelfCollided(a); });
+    script.setBuiltin("self_contact_above", [this](const std::vector<Value> &a) { return builtinSelfContactAbove(a); });
+    script.setBuiltin("self_set_nametag", [this](const std::vector<Value> &a) { return builtinSelfSetNametag(a); });
+    script.setBuiltin("reset_scene", [this](const std::vector<Value> &a) { return builtinResetScene(a); });
     script.setBuiltin("self_explode", [this](const std::vector<Value> &a) { return builtinSelfExplode(a); });
 
     script.setBuiltin("spawn_cube", [this](const std::vector<Value> &a) { return builtinSpawn(a, "cube"); });
@@ -188,12 +191,32 @@ static glm::vec3 vec3FromArgs(const std::vector<Value> &args, glm::vec3 def)
     return v;
 }
 
+namespace
+{
+    // Bullet only refreshes broadphase AABBs for the bodies it simulates, so a
+    // *static* body a script repositions keeps colliding at the spot it was
+    // created — a script-driven platform or pressure plate would still be solid
+    // where it used to be and pass through where it now is. applyTransform
+    // moves the body itself but knows nothing about the world it lives in, so
+    // the refresh has to happen here.
+    void refreshBroadphase(Scene *scene, ecs::Entity e)
+    {
+        if (!scene)
+            return;
+        auto *p = scene->registry().try_get<ecs::Physics>(e);
+        PhysicsWorld *phys = scene->physicsWorld();
+        if (p && p->body && phys)
+            phys->updateSingleAabb(p->body.get());
+    }
+}
+
 Value ScriptHost::builtinSelfSetPos(const std::vector<Value> &args)
 {
     auto *t = getSelfTransform(sceneRef, selfEntity);
     if (!t) return Value::makeNull();
     glm::vec3 np = vec3FromArgs(args, glm::vec3(t->position));
     ecs::applyTransform(sceneRef->registry(), selfEntity, np, glm::vec3(t->rotation), glm::vec3(t->scale));
+    refreshBroadphase(sceneRef, selfEntity);
     return Value::makeNull();
 }
 
@@ -203,6 +226,7 @@ Value ScriptHost::builtinSelfSetRot(const std::vector<Value> &args)
     if (!t) return Value::makeNull();
     glm::vec3 nr = vec3FromArgs(args, glm::vec3(t->rotation));
     ecs::applyTransform(sceneRef->registry(), selfEntity, glm::vec3(t->position), nr, glm::vec3(t->scale));
+    refreshBroadphase(sceneRef, selfEntity);
     return Value::makeNull();
 }
 
@@ -212,6 +236,7 @@ Value ScriptHost::builtinSelfSetScaleFn(const std::vector<Value> &args)
     if (!t) return Value::makeNull();
     glm::vec3 ns = vec3FromArgs(args, glm::vec3(t->scale));
     ecs::applyTransform(sceneRef->registry(), selfEntity, glm::vec3(t->position), glm::vec3(t->rotation), ns);
+    refreshBroadphase(sceneRef, selfEntity);
     return Value::makeNull();
 }
 
@@ -277,6 +302,66 @@ Value ScriptHost::builtinSelfOnGround(const std::vector<Value> &)
     btCollisionWorld::ClosestRayResultCallback cb(start, end);
     phys->rayTest(start, end, cb);
     return Value::makeBool(cb.hasHit());
+}
+
+// self_set_nametag(text, offset, size) — float a label above this object.
+//
+// Drawn by ecs::nametagSystem, the same one that labels players in multiplayer:
+// billboarded at the camera, faded with distance, and grown a little far away
+// so it stays readable. `offset` is how far above the object's origin it sits.
+// An empty string removes the label.
+Value ScriptHost::builtinSelfSetNametag(const std::vector<Value> &args)
+{
+    if (!sceneRef || selfEntity == ecs::NullEntity) return Value::makeNull();
+    if (!sceneRef->registry().valid(selfEntity)) return Value::makeNull();
+
+    ecs::Nametag tag;
+    if (auto *existing = sceneRef->registry().try_get<ecs::Nametag>(selfEntity))
+        tag = *existing;
+    if (args.size() > 0)
+        tag.text = args[0].toString();
+    if (args.size() > 1)
+        tag.offset = static_cast<float>(args[1].toNumber());
+    if (args.size() > 2)
+        tag.size = static_cast<float>(args[2].toNumber());
+    if (args.size() > 5)
+        tag.color = glm::vec4(static_cast<float>(args[3].toNumber()),
+                              static_cast<float>(args[4].toNumber()),
+                              static_cast<float>(args[5].toNumber()), 1.0f);
+    sceneRef->registry().emplace_or_replace<ecs::Nametag>(selfEntity, std::move(tag));
+    return Value::makeNull();
+}
+
+// reset_scene() — reload the scene from disk, putting the world back as authored.
+Value ScriptHost::builtinResetScene(const std::vector<Value> &)
+{
+    // Server-authoritative when networked, like spawn/destroy/explode: a client
+    // resetting its own copy of the world would simply desync it from everyone
+    // else's, and the server's reset replicates back on its own.
+    if (!spawnEnabled || !sceneRef) return Value::makeNull();
+    sceneRef->requestReset();
+    return Value::makeNull();
+}
+
+// self_contact_above() — the object resting on top of this one, or null.
+//
+// Returns a handle rather than a bool because null is already falsy, so it
+// reads the same in an `if` while also handing the script the thing that is
+// standing on it — which is what a pressure plate wants: to launch it, weigh
+// it, or recolour it.
+Value ScriptHost::builtinSelfContactAbove(const std::vector<Value> &)
+{
+    if (!sceneRef || selfEntity == ecs::NullEntity) return Value::makeNull();
+    auto *p = sceneRef->registry().try_get<ecs::Physics>(selfEntity);
+    if (!p || !p->body) return Value::makeNull();
+    PhysicsWorld *phys = sceneRef->physicsWorld();
+    if (!phys) return Value::makeNull();
+
+    const btRigidBody *other = phys->contactAbove(p->body.get());
+    if (!other) return Value::makeNull();
+    ecs::Entity e = ecs::fromUserPointer(other->getUserPointer());
+    if (e == ecs::NullEntity || !sceneRef->registry().valid(e)) return Value::makeNull();
+    return entityHandle("object", e);
 }
 
 // self_set_friction(f) — set this body's Coulomb friction coefficient.

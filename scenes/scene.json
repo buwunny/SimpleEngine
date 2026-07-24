@@ -138,6 +138,81 @@
             ],
             "type": "Plane",
             "width": 1000.0
+        },
+        {
+            "color": "#E64059FF",
+            "mass": 0.0,
+            "name": "Plate Launch",
+            "position": [
+                0.0,
+                0.15,
+                4.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "scale": [
+                2.4,
+                0.3,
+                2.4
+            ],
+            "scripts": [
+                "scripts/button.cow"
+            ],
+            "size": 1,
+            "type": "Cube"
+        },
+        {
+            "color": "#4080F2FF",
+            "mass": 0.0,
+            "name": "Plate Spawn",
+            "position": [
+                -6.5,
+                0.15,
+                -1.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "scale": [
+                2.4,
+                0.3,
+                2.4
+            ],
+            "scripts": [
+                "scripts/plate_spawn.cow"
+            ],
+            "size": 1,
+            "type": "Cube"
+        },
+        {
+            "color": "#FFBF1AFF",
+            "mass": 0.0,
+            "name": "Plate Reset 1",
+            "position": [
+                -40.0,
+                0.15,
+                -40.0
+            ],
+            "rotation": [
+                0.0,
+                0.0,
+                0.0
+            ],
+            "scale": [
+                3.0,
+                0.3,
+                3.0
+            ],
+            "scripts": [
+                "scripts/plate_reset.cow"
+            ],
+            "size": 1,
+            "type": "Cube"
         }
     ],
     "scenePath": "scenes/scene.json"

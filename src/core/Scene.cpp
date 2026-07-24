@@ -204,6 +204,10 @@ bool Scene::loadFromJSON(const std::string &path)
         return false;
     }
 
+    // Snapshot for resetToInitial(). Taken on every successful load, so a
+    // reset returns to the most recently loaded world rather than the first.
+    initialJson_ = j.dump();
+
     // Tear down all entities except the player. The player is rebuilt by the
     // caller (Application) after load if needed.
     if (physicsWorld_)
@@ -506,6 +510,23 @@ void Scene::checkReload()
         lastAutoReloadTime_ = now;
         loadFromJSON(scenePath_);
     }
+}
+
+void Scene::resetToInitial()
+{
+    if (initialJson_.empty())
+    {
+        forceReload();
+        return;
+    }
+    // loadFromString round-trips through a temp file, which leaves scenePath_
+    // and the reload stamp pointing at a file that is deleted moments later.
+    // Preserve them, or the editor's hot-reload watch is left aimed at nothing.
+    const std::string path = scenePath_;
+    const auto stamp = lastWriteTime_;
+    loadFromString(initialJson_);
+    scenePath_ = path;
+    lastWriteTime_ = stamp;
 }
 
 void Scene::forceReload()

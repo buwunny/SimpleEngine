@@ -68,6 +68,9 @@ private:
     cowscript::Value builtinSelfOnGround(const std::vector<cowscript::Value> &args);
     cowscript::Value builtinSelfSetFriction(const std::vector<cowscript::Value> &args);
     cowscript::Value builtinSelfCollided(const std::vector<cowscript::Value> &args);
+    cowscript::Value builtinSelfContactAbove(const std::vector<cowscript::Value> &args);
+    cowscript::Value builtinSelfSetNametag(const std::vector<cowscript::Value> &args);
+    cowscript::Value builtinResetScene(const std::vector<cowscript::Value> &args);
     cowscript::Value builtinSelfExplode(const std::vector<cowscript::Value> &args);
 
     cowscript::Value builtinSpawn(const std::vector<cowscript::Value> &args, const std::string &kind);

@@ -62,6 +62,10 @@ private:
     // scripts per step so client prediction and the future server tick share
     // one deterministic cadence. Rendering stays per-frame.
     void advanceSim(float frameDelta, bool sampleLocalInput);
+
+    // Carry out a reset_scene() a script asked for, once scripts have finished
+    // running for the frame. See Scene::requestReset.
+    void applyPendingReset();
     double simAccumulator = 0.0;
 
     PhysicsWorld *physics = nullptr;
