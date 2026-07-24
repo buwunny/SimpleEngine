@@ -1309,7 +1309,7 @@ namespace cowscript
             "self_sx", "self_sy", "self_sz",
             "self_set_pos", "self_set_rot", "self_set_scale", "self_set_color",
             "self_apply_impulse", "self_apply_force", "self_set_velocity",
-            "self_on_ground",
+            "self_on_ground", "self_collided", "self_explode", "self_set_friction",
             "spawn_cube", "spawn_cow", "spawn_plane",
             "destroy", "destroy_self", "attach_script",
             "self", "transform", "rigidbody", "camera",

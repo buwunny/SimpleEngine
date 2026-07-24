@@ -12,6 +12,9 @@
 #include "meshes/AssetManager.hpp"
 #include "meshes/CubeMesh.hpp"
 #include "meshes/PlaneMesh.hpp"
+#if !defined(ENGINE_HEADLESS)
+#include "meshes/ShockwaveMesh.hpp"
+#endif
 #include "script/CowScript.hpp"
 #include "script/ScriptHost.hpp"
 #include "core/Camera.hpp"
@@ -780,6 +783,50 @@ ecs::Entity Scene::raycast(const glm::vec3 &origin, const glm::vec3 &direction, 
         return ecs::NullEntity;
     return ecs::fromUserPointer(colObj->getUserPointer());
 }
+
+void Scene::explode(const glm::vec3 &pos, const PhysicsWorld::BlastParams &params)
+{
+    if (physicsWorld_)
+        physicsWorld_->applyRadialBlast(btVector3(pos.x, pos.y, pos.z), params);
+
+#if !defined(ENGINE_HEADLESS)
+    // The shockwave ring. It carries no Identity and no ShapeMarker on purpose:
+    // those are what put an entity in the hierarchy panel and in the saved
+    // scene, and a blast is neither an object the user owns nor state worth
+    // persisting. blastVfxSystem owns it from here and destroys it when spent.
+    {
+        // One mesh shared by every blast, built on first use so a headless-ish
+        // client that never explodes anything never allocates a GL buffer.
+        static std::shared_ptr<Mesh> s_shockwave;
+        if (!s_shockwave)
+            s_shockwave = std::make_shared<ShockwaveMesh>();
+
+        ecs::Entity e = reg_.create();
+
+        ecs::Transform t;
+        // The ring mesh is unit radius, so modelNoScale is the blast's position
+        // and blastVfxSystem animates size purely through the scale factor.
+        t.position = glm::dvec3(pos);
+        t.modelNoScale = glm::translate(glm::mat4(1.0f), pos);
+        t.model = t.modelNoScale;
+        reg_.emplace<ecs::Transform>(e, std::move(t));
+
+        ecs::Renderable rd;
+        rd.mesh = s_shockwave;
+        rd.wireframe = true;
+        reg_.emplace<ecs::Renderable>(e, std::move(rd));
+
+        ecs::BlastVfx vfx;
+        vfx.radius = params.radius;
+        reg_.emplace<ecs::BlastVfx>(e, vfx);
+    }
+#endif
+
+    // Last, so the observer sees a blast that has already been applied locally.
+    if (onExplosion_)
+        onExplosion_(pos, params);
+}
+
 
 #if !defined(ENGINE_HEADLESS)
 void Scene::render(Window &window, Shader &shader)

@@ -170,6 +170,26 @@ namespace net
             {
                 removeRep(despawn->netId);
             }
+            else if (const auto *boom = std::get_if<Explosion>(&*msg))
+            {
+                // Replay the server's blast locally. Every body here except the
+                // player we predict is kinematic (claimSceneObjects made it so),
+                // and applyRadialBlast skips those, so this lands the knockback
+                // on exactly the one body this client simulates itself — and
+                // draws the shockwave for the rest.
+                //
+                // Gated on joined_ so a blast arriving before ServerWelcome
+                // can't shove a player that isn't in the world yet.
+                if (joined_)
+                {
+                    PhysicsWorld::BlastParams p;
+                    p.radius = boom->radius;
+                    p.speed = boom->speed;
+                    p.upBias = boom->upBias;
+                    p.spin = boom->spin;
+                    scene_->explode(boom->pos, p);
+                }
+            }
             else if (const auto *snap = std::get_if<Snapshot>(&*msg))
             {
                 if (!joined_)

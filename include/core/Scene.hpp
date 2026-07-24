@@ -14,6 +14,7 @@ class Shader;
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -54,6 +55,23 @@ public:
 
     // Returns the entity hit by a world-space ray, or NullEntity if nothing hit.
     ecs::Entity raycast(const glm::vec3 &origin, const glm::vec3 &direction, float maxDistance);
+
+    // Set off an explosion at `pos`: knock nearby dynamic bodies away (see
+    // PhysicsWorld::applyRadialBlast) and leave a shockwave ring behind.
+    //
+    // This is the single entry point for a blast wherever it originates — a
+    // .cow script calling self_explode, or, on a networked client, an Explosion
+    // event replayed from the server. On that client every body except the
+    // locally-predicted player is kinematic, and applyRadialBlast skips those,
+    // so the same call lands the knockback on exactly the one body the client
+    // simulates itself.
+    void explode(const glm::vec3 &pos, const PhysicsWorld::BlastParams &params);
+
+    // Notified after every explosion. The server hooks this to replicate the
+    // blast to clients; it is left unset in single-player and on the client,
+    // where an incoming Explosion must not bounce straight back out.
+    using ExplosionObserver = std::function<void(const glm::vec3 &, const PhysicsWorld::BlastParams &)>;
+    void setExplosionObserver(ExplosionObserver fn) { onExplosion_ = std::move(fn); }
 
     void addPlayer(Camera *camera, const glm::mat4 &model, Window *window, PhysicsWorld &physics);
     ecs::Entity getPlayerEntity() const { return playerEntity_; }
@@ -154,6 +172,7 @@ private:
     std::string scenePath_;
     std::filesystem::file_time_type lastWriteTime_;
     PhysicsWorld *physicsWorld_ = nullptr;
+    ExplosionObserver onExplosion_;
     std::chrono::steady_clock::time_point lastAutoReloadTime_ = std::chrono::steady_clock::time_point::min();
     std::chrono::milliseconds reloadDebounce_{500};
     static Scene *s_current;

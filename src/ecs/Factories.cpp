@@ -221,6 +221,25 @@ namespace ecs
             body->setActivationState(ACTIVE_TAG);
             body->setUserPointer(toUserPointer(e));
 
+            // Continuous collision detection: without this, a small/fast dynamic
+            // body (a rocket-speed fired cow, say) can cross more than its own
+            // size in a single tick and tunnel straight through thin geometry
+            // like the ground plane's 0.02-unit-thick collision box, since
+            // discrete collision detection only checks overlap at tick
+            // boundaries. Only worth enabling for bodies that actually move
+            // (mass 0 = static).
+            if (mass != 0.0)
+            {
+                btVector3 center;
+                btScalar radius = 0.0f;
+                shape->getBoundingSphere(center, radius);
+                if (radius > 0.0f)
+                {
+                    body->setCcdMotionThreshold(radius);
+                    body->setCcdSweptSphereRadius(radius * 0.5f);
+                }
+            }
+
             Physics phys;
             phys.shape = std::move(shape);
             phys.motion = std::move(motion);

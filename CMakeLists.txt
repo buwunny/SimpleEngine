@@ -56,6 +56,7 @@ set(SOURCES
     src/meshes/PlaneMesh.cpp
     src/meshes/CubeMesh.cpp
     src/meshes/CircleMesh.cpp
+    src/meshes/ShockwaveMesh.cpp
     src/meshes/StaticMesh.cpp
     src/meshes/AssetManager.cpp
     src/ecs/Factories.cpp
@@ -63,6 +64,7 @@ set(SOURCES
     src/ecs/systems/PhysicsSyncSystem.cpp
     src/ecs/systems/RenderSystem.cpp
     src/ecs/systems/NametagSystem.cpp
+    src/ecs/systems/BlastVfxSystem.cpp
     src/ecs/systems/ScriptSystem.cpp
     src/ecs/systems/PlayerInputSystem.cpp
     src/ecs/systems/LocalInputSystem.cpp

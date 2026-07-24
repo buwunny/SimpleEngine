@@ -69,6 +69,22 @@ bool GameServer::init(const std::string &scenePath)
     // cow) is announced to clients. Connected before any entities exist.
     scene_.registry().on_destroy<ecs::NetId>().connect<&GameServer::onNetIdDestroyed>(*this);
 
+    // Explosions can't be inferred from snapshots fast enough to feel right, so
+    // they're replicated as events. Queue rather than send here: this fires from
+    // inside the script update, and every other outbound message in a tick is
+    // flushed together once the simulation for that tick is complete.
+    scene_.setExplosionObserver(
+        [this](const glm::vec3 &pos, const PhysicsWorld::BlastParams &p)
+        {
+            net::Explosion e;
+            e.pos = pos;
+            e.radius = p.radius;
+            e.speed = p.speed;
+            e.upBias = p.upBias;
+            e.spin = p.spin;
+            pendingExplosions_.push_back(e);
+        });
+
     if (!scene_.loadFromJSON(scenePath))
     {
         std::cerr << "GameServer: failed to load scene '" << scenePath
@@ -357,6 +373,21 @@ void GameServer::flushDespawns()
     pendingDespawns_.clear();
 }
 
+void GameServer::flushExplosions()
+{
+    if (pendingExplosions_.empty())
+        return;
+    // Not replayed to late joiners, unlike SpawnEntity: a blast is an instant,
+    // not a piece of world state, and re-sending it on join would shove a player
+    // who wasn't there when it happened.
+    if (send_)
+        for (const net::Explosion &e : pendingExplosions_)
+            for (auto &[id, s] : sessions_)
+                if (s.spawned)
+                    send_(id, e);
+    pendingExplosions_.clear();
+}
+
 void GameServer::sweepIdleSessions()
 {
     // A clean disconnect sends PlayerLeave via onDisconnect. But if the transport
@@ -418,6 +449,10 @@ void GameServer::tick(float dt)
     // Pick up anything the scripts spawned and tell the clients about it, then
     // announce anything they destroyed (e.g. shoot_cow despawning old cows).
     detectAndAnnounceSpawns();
+    // Before the despawn: a cow announces its blast and only then removes
+    // itself, so a client that applies them in arrival order sees the same
+    // sequence the server simulated.
+    flushExplosions();
     flushDespawns();
 
     ++serverTick_;

@@ -70,6 +70,10 @@ private:
     // Broadcast DespawnEntity for entities destroyed since the last tick and drop
     // them from the late-join replay list.
     void flushDespawns();
+    // Broadcast every blast that went off this tick, so each client can apply the
+    // same knockback to the player it predicts locally instead of discovering it
+    // several snapshots later as a position error.
+    void flushExplosions();
 
     Scene scene_;
     PhysicsWorld physics_;
@@ -81,6 +85,7 @@ private:
     uint32_t nextSpawnNetId_ = 0;                     // -> net::kSpawnNetIdBase + counter
     std::vector<net::SpawnEntity> spawnedObjects_;    // for late-join replay
     std::vector<uint32_t> pendingDespawns_;           // netIds destroyed this tick
+    std::vector<net::Explosion> pendingExplosions_;   // blasts fired this tick
     void sweepIdleSessions();
 
     uint32_t serverTick_ = 0;

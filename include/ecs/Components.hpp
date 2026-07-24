@@ -144,6 +144,21 @@ namespace ecs
         glm::vec4 color{1.0f};
     };
 
+    // The expanding ring an explosion leaves behind, driven by ecs::blastVfxSystem
+    // (which also destroys the entity once `age` passes `life`).
+    //
+    // Purely cosmetic, and deliberately outside every other pipeline: no physics
+    // body, never serialized with the scene, and never created on the headless
+    // server. A blast that mattered to the simulation would have to be replicated
+    // as state; this one is re-derived on each client from the Explosion event.
+    struct BlastVfx
+    {
+        float age = 0.0f;
+        float life = 0.35f;   // seconds from detonation to gone
+        float radius = 6.0f;  // radius the ring expands to — the blast's own
+        glm::vec4 color{1.0f, 0.72f, 0.25f, 1.0f};
+    };
+
     // Network replication id. On the server, every replicated entity carries one
     // (scene dynamic objects use their Identity.id; players and spawned objects
     // use high id ranges — see net::kPlayerNetIdBase / kSpawnNetIdBase). Snapshots

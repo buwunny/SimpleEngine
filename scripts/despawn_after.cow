@@ -1,11 +1,18 @@
-// despawn_after.cow - a self-contained lifetime. Attach it to any object and it
-// removes itself once `lifetime` seconds have passed.
+// despawn_after.cow - a self-contained lifetime, and the detonation that ends
+// it. Attach it to any object and it explodes and removes itself, either on
+// impact or once `lifetime` seconds have passed with nothing hit.
 //
 // shoot_cow.cow attaches this to every cow it fires (attach_script). Giving each
 // shot its own countdown is what lets any number of them be in the air at once:
 // the shooter no longer has to remember one cow and destroy it to make room.
+//
+// Chain reactions come for free rather than being coded here. A blast throws
+// every nearby cow outward, each of those cows hits something within a frame or
+// two, and each hit runs this same handler. The chain terminates on its own
+// because a cow is destroyed by the blast it sets off.
 
-let lifetime = 4      // seconds this object lives before despawning
+let lifetime = 4      // seconds this object lives if it never hits anything
+let arm_delay = 0.05  // seconds before impact can set it off (see below)
 let born = 0
 
 on start() {
@@ -13,7 +20,27 @@ on start() {
 }
 
 on update(dt) {
-    if (time() - born > lifetime) {
+    let age = time() - born
+
+    // The fuse has to arm rather than being live from spawn. A cow is created
+    // 1.5 m down the shooter's view axis, and when they are looking steeply
+    // down that point is inside their own capsule -- so on the very first frame
+    // it is already "touching" them. Without the delay the cow would detonate
+    // there, mid-body, instead of an instant later where it actually landed.
+    let armed = age > arm_delay
+
+    if (age > lifetime or (armed and self_collided())) {
+        // radius, then peak speed. Both are velocity-space now: `speed` is the
+        // metres per second the blast adds to something standing at its centre,
+        // whatever that thing weighs. Height goes with the square of it, so
+        // this dial is touchier than it looks -- 24 against gravity of 19.62
+        // clears about 14 m, roughly five and a half times the movement
+        // script's own jump.
+        //
+        // Radius 6 is the precision dial. The falloff holds most of its power
+        // across the first half of that, so landing a shot anywhere near your
+        // feet launches you, while a blast 5 m away is a shove and no more.
+        self_explode(6, 24)
         destroy_self()
     }
 }

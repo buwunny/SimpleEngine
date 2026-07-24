@@ -20,12 +20,14 @@
 // — never reorder or repurpose, since old clients and servers must interoperate.
 namespace net
 {
-    // Bumped to 2 for the shared-physics/despawn generation, 4 for player names.
+    // Bumped to 2 for the shared-physics/despawn generation, 4 for player names,
+    // 5 for replicated explosions (an old client would decode MsgType 9 as
+    // garbage and drop the connection's framing).
     // The server refuses a ClientHello whose version doesn't match, so a stale
     // binary (an old server left holding the port, or a browser-cached old
     // client) is rejected loudly instead of silently interoperating and
     // producing duplicate/ghost objects.
-    inline constexpr uint16_t kProtocolVersion = 4;
+    inline constexpr uint16_t kProtocolVersion = 5;
 
     // Longest player name the server will keep; anything longer is truncated.
     // Nametags are drawn in the world above a player's head, so this is a
@@ -69,6 +71,7 @@ namespace net
         PlayerLeave = 6,
         SpawnEntity = 7,
         DespawnEntity = 8,
+        Explosion = 9,
     };
 
     // Reliability channel a message should travel on.
@@ -156,9 +159,29 @@ namespace net
         uint32_t netId = 0;
     };
 
+    // Server -> client: a blast went off. Sent because knockback is the one
+    // server-side effect a client cannot infer from snapshots in time — a
+    // rocket jump is over in a few hundred milliseconds, and reaching the
+    // player through position corrections alone at snapshotHz turns an instant
+    // launch into a rubber-band. On receipt the client replays the same blast
+    // against its predicted player, so the launch begins on the frame it
+    // arrives and the snapshots that follow only trim the error.
+    //
+    // Mirrors PhysicsWorld::BlastParams; kept as loose fields rather than
+    // including the physics header, since the protocol is shared with the web
+    // client and must stay free of Bullet.
+    struct Explosion
+    {
+        glm::vec3 pos{0.0f};
+        float radius = 6.0f;
+        float speed = 24.0f;
+        float upBias = 0.35f;
+        float spin = 8.0f;
+    };
+
     using Message = std::variant<ClientHello, ServerWelcome, InputCommand,
                                  Snapshot, PlayerJoin, PlayerLeave,
-                                 SpawnEntity, DespawnEntity>;
+                                 SpawnEntity, DespawnEntity, Explosion>;
 
     // The MsgType tag for a given message alternative.
     MsgType typeOf(const Message &m);

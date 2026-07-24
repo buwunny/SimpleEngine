@@ -15,6 +15,7 @@ namespace net
             MsgType operator()(const PlayerLeave &) const { return MsgType::PlayerLeave; }
             MsgType operator()(const SpawnEntity &) const { return MsgType::SpawnEntity; }
             MsgType operator()(const DespawnEntity &) const { return MsgType::DespawnEntity; }
+            MsgType operator()(const Explosion &) const { return MsgType::Explosion; }
         };
         return std::visit(V{}, m);
     }
@@ -83,6 +84,14 @@ namespace net
             w.f32(m.color.a);
         }
         void writeBody(ByteWriter &w, const DespawnEntity &m) { w.u32(m.netId); }
+        void writeBody(ByteWriter &w, const Explosion &m)
+        {
+            w.vec3(m.pos);
+            w.f32(m.radius);
+            w.f32(m.speed);
+            w.f32(m.upBias);
+            w.f32(m.spin);
+        }
     }
 
     std::vector<uint8_t> encode(const Message &m)
@@ -185,6 +194,17 @@ namespace net
         {
             DespawnEntity m;
             m.netId = r.u32();
+            out = m;
+            break;
+        }
+        case MsgType::Explosion:
+        {
+            Explosion m;
+            m.pos = r.vec3();
+            m.radius = r.f32();
+            m.speed = r.f32();
+            m.upBias = r.f32();
+            m.spin = r.f32();
             out = m;
             break;
         }

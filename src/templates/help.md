@@ -196,6 +196,9 @@ These require the object to have a Rigidbody (mass > 0).
 | `self_apply_force(x, y, z)` | Apply a continuous force (per frame) |
 | `self_set_velocity(x, y, z)` | Set linear velocity directly |
 | `self_on_ground()` | `true` if a short ray straight down hits something (jump/ground check) |
+| `self_set_friction(f)` | Set this body's friction coefficient (`0` = frictionless) |
+| `self_collided()` | `true` if this object is currently touching anything, any direction |
+| `self_explode(radius, speed, up_bias, spin)` | Detonate at this object's position — see below |
 
 ```
 on update(dt) {
@@ -204,6 +207,38 @@ on update(dt) {
     }
 }
 ```
+
+### Explosions
+
+`self_explode()` shoves every dynamic body near this object away from it. All
+four arguments are optional:
+
+| Argument | Default | Meaning |
+|----------|---------|---------|
+| `radius` | `6` | Metres. Nothing beyond this is affected at all. |
+| `speed` | `24` | Metres per second added to something standing at the centre. |
+| `up_bias` | `0.35` | How far the push tilts upward. `0` is purely radial. |
+| `spin` | `8` | Tumble imparted to debris. The player never spins. |
+
+`speed` is a **velocity change, not a force**: a blast adds the same metres per
+second to a heavy player as to a light prop, so one number is tuned correctly for
+everything at once and you never have to think about mass.
+
+Two behaviours are worth knowing when tuning:
+
+- **Falloff is `1 - (d/r)²`.** Most of the blast's strength is spread across the
+  near half of the radius and then drops off sharply, so there is a forgiving
+  sweet spot rather than a knife edge, and a distant blast is only a nudge.
+- **`up_bias` is what makes rocket jumping work.** A blast that goes off beside
+  you at floor level is a purely sideways push into the floor, and friction eats
+  it. The upward tilt turns it into a launch.
+
+Static geometry between the blast and a target weakens the push but never
+cancels it — a shot that detonates half-buried in the surface it hit would
+otherwise be a silent dud.
+
+See `scripts/despawn_after.cow` for the exploding cows the sample scene fires,
+including how chain reactions fall out of it for free.
 
 ---
 

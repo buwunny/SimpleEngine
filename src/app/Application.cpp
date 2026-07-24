@@ -4,6 +4,7 @@
 #include "ecs/systems/LocalInputSystem.hpp"
 #include "ecs/systems/RenderSystem.hpp"
 #include "ecs/systems/NametagSystem.hpp"
+#include "ecs/systems/BlastVfxSystem.hpp"
 #ifdef __EMSCRIPTEN__
 #include "net/WebClientTransport.hpp"
 #include "net/NetClient.hpp"
@@ -226,6 +227,13 @@ void Application::tick()
         fpsCount = 0;
         fpsTimer = 0.0;
     }
+
+    // Explosion rings, on real frame time rather than the fixed sim step, and
+    // outside advanceSim on purpose: they're animation with no bearing on the
+    // simulation, and in the editor advanceSim only runs while testing — a ring
+    // left over from the moment testing stopped would otherwise hang in the
+    // scene forever instead of expiring.
+    ecs::blastVfxSystem(scene->registry(), delta);
 #if !ENGINE_WITH_EDITOR
     {
         int width = 0, height = 0;

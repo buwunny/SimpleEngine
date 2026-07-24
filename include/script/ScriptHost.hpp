@@ -32,9 +32,11 @@ public:
     void setContext(Scene *scene, Window *window) { sceneRef = scene; windowRef = window; }
     void setLogger(LogFn fn) { logger = std::move(fn); }
     void setGlobalKeyQuery(KeyQueryFn fn) { globalKeyQuery = std::move(fn); }
-    // When false, spawn_* builtins create nothing and return an inert handle
-    // (property reads/writes are absorbed). The networked client disables spawns
-    // so objects come authoritatively from the server instead of double-spawning.
+    // When false, the builtins that *change the shared world* — spawn_*,
+    // destroy, self_explode — do nothing (spawns return an inert handle whose
+    // property reads/writes are absorbed). The networked client turns this off
+    // so those effects come authoritatively from the server, replicated back,
+    // instead of the client also producing its own copy of each one.
     void setSpawnEnabled(bool enabled) { spawnEnabled = enabled; }
 
     void bindBuiltins(cowscript::Script &script);
@@ -64,6 +66,9 @@ private:
     cowscript::Value builtinSelfApplyForce(const std::vector<cowscript::Value> &args);
     cowscript::Value builtinSelfSetVelocity(const std::vector<cowscript::Value> &args);
     cowscript::Value builtinSelfOnGround(const std::vector<cowscript::Value> &args);
+    cowscript::Value builtinSelfSetFriction(const std::vector<cowscript::Value> &args);
+    cowscript::Value builtinSelfCollided(const std::vector<cowscript::Value> &args);
+    cowscript::Value builtinSelfExplode(const std::vector<cowscript::Value> &args);
 
     cowscript::Value builtinSpawn(const std::vector<cowscript::Value> &args, const std::string &kind);
     cowscript::Value builtinDestroy(const std::vector<cowscript::Value> &args);

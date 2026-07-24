@@ -11,7 +11,14 @@
 let was_down = false
 let speed = 100
 let size = 0.1        // uniform scale of a fired cow
-let muzzle = 2        // metres ahead of the eye the cow appears
+
+// Metres ahead of the eye the cow appears. This is the rocket-jump dial, and
+// the constraint is the floor rather than the player: the eye sits 2 m up, so
+// anything larger than 2 puts a straight-down shot *under* the ground, where it
+// detonates on the far side of the floor and most of the blast is absorbed by
+// it. At 1.5 the same shot spawns just above the floor and gets to detonate
+// against it, which is the launch you were aiming for.
+let muzzle = 1.5
 
 on update(dt) {
     let down = key("c")

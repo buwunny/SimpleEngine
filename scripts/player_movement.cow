@@ -9,11 +9,22 @@
 //   rigidbody()        -> handle with .vx/.vy/.vz (velocity) and .px/.py/.pz (position)
 //   self_on_ground()   -> raycast ground check, so we only jump when grounded
 
-let speed = 100          // acceleration applied per second while a key is held
-let max_speed = 10       // overall speed cap (sprint doubles it)
+let speed = 100          // ground acceleration (m/s^2) toward max_speed
+let max_speed = 10       // horizontal speed cap (sprint doubles it)
 let jump_velocity = 10   // upward velocity on jump
 let air_control = 0.1    // fraction of ground acceleration while airborne
 let eye_height = 1       // camera sits this far above the body centre
+let land_grace = 0.35    // seconds after a fast landing that keep their speed
+let ground_friction = 1  // normal footing
+let slide_friction = 0.1 // footing while sliding out a fast landing
+
+// A note on the cap, because it is easy to misread: max_speed limits what the
+// *keys* can do, not how fast the body may travel. An explosion is free to send
+// the player well past it, and nothing here claws that back -- see the airborne
+// branch below.
+
+// Grace-window state, carried between frames.
+let grace = 0
 
 on update(dt) {
     let cam = camera()
@@ -35,51 +46,138 @@ on update(dt) {
     let right_z = cam.rz / rl
 
     let grounded = self_on_ground()
-    let step = speed * dt
-    if (not grounded) {
-        step = step * air_control
-    }
-
-    // Accumulate onto the current velocity so momentum carries between frames.
-    let vx = rb.vx
-    let vy = rb.vy
-    let vz = rb.vz
-
-    if (key("w")) {
-        vx = vx + fwd_x * step
-        vz = vz + fwd_z * step
-    }
-    if (key("s")) {
-        vx = vx - fwd_x * step
-        vz = vz - fwd_z * step
-    }
-    if (key("a")) {
-        vx = vx - right_x * step
-        vz = vz - right_z * step
-    }
-    if (key("d")) {
-        vx = vx + right_x * step
-        vz = vz + right_z * step
-    }
-    if (key("space") and grounded) {
-        vy = jump_velocity
-    }
-
-    // Cap the speed. Holding shift lets you sprint.
     let cap = max_speed
     if (key("shift")) {
         cap = cap * 2
     }
-    let mag = sqrt(vx * vx + vy * vy + vz * vz)
-    if (mag > cap) {
-        vx = vx / mag * cap
-        vy = vy / mag * cap
-        vz = vz / mag * cap
+
+    // Desired horizontal direction from input alone -- 0 if nothing held.
+    let dir_x = 0
+    let dir_z = 0
+    if (key("w")) { dir_x = dir_x + fwd_x; dir_z = dir_z + fwd_z }
+    if (key("s")) { dir_x = dir_x - fwd_x; dir_z = dir_z - fwd_z }
+    if (key("a")) { dir_x = dir_x - right_x; dir_z = dir_z - right_z }
+    if (key("d")) { dir_x = dir_x + right_x; dir_z = dir_z + right_z }
+    let dlen = sqrt(dir_x * dir_x + dir_z * dir_z)
+
+    // Touching down normally hands the body straight back to the grounded
+    // branch, which brakes anything above the cap at the full ground
+    // acceleration -- a 15 m/s rocket jump is scrubbed to walking pace in about
+    // an eighth of a second, so landing kills a run and jumps can never be
+    // chained. So a landing that arrives *above* the cap opens a short window
+    // where the airborne rule applies instead: add along the key direction,
+    // never subtract.
+    //
+    // Note what this does not do. Bullet's own friction on the capsule keeps
+    // bleeding the slide the whole time, so it decays and ends on its own;
+    // all the window changes is that the script stops actively killing it.
+    // The window is armed continuously while airborne and only spent once down,
+    // rather than being opened by a not-grounded-to-grounded edge. There is no
+    // reliable edge to catch: self_on_ground() casts 1.05 m against a capsule
+    // whose half-height is 1.0, so it reports ground slightly before contact,
+    // and the body then takes a few frames to settle. Watching for the
+    // transition meant the window opened several frames after the braking had
+    // already started, having eaten a third of the speed it existed to keep.
+    let hspeed = sqrt(rb.vx * rb.vx + rb.vz * rb.vz)
+    if (not grounded) {
+        grace = land_grace
+    } else {
+        grace = grace - dt
+    }
+    // Once back to walking pace there is nothing left worth preserving, and
+    // holding the window open past that point would just make ordinary walking
+    // feel like ice. This is also what keeps normal movement untouched: an
+    // ordinary jump never exceeds the cap, so it lands with the window shut.
+    if (hspeed <= cap) { grace = 0 }
+
+    let keep_momentum = false
+    if (not grounded) { keep_momentum = true }
+    if (grace > 0) { keep_momentum = true }
+
+    // Friction has to go down too, and it has to go down *before* the landing
+    // rather than in response to it. Bullet resolves the touchdown penetration
+    // with one large normal impulse and scales friction by it, so the contact
+    // frame alone costs a 17 m/s slide about 6 m/s -- more than a full second
+    // of the script's own deceleration, and all of it spent before the script
+    // gets a chance to notice it is grounded. Setting this while still airborne
+    // is what makes the window mean anything.
+    //
+    // Gated on being over the cap so ordinary movement is untouched: a normal
+    // jump never exceeds it, so it lands with normal footing.
+    if (keep_momentum and hspeed > cap) {
+        self_set_friction(slide_friction)
+    } else {
+        self_set_friction(ground_friction)
     }
 
-    rb.vx = vx
-    rb.vy = vy
-    rb.vz = vz
+    // Full authority while sliding, so the window is controllable rather than
+    // something that merely happens to you; only actual flight is limited to
+    // air_control.
+    let accel = speed * dt
+    if (not grounded) { accel = accel * air_control }
+
+    // Ground and air steer the body in deliberately different ways.
+    if (not keep_momentum) {
+        // On the ground, steer the rigidbody's *actual* horizontal velocity
+        // toward the target at a bounded rate rather than assigning an absolute
+        // capped value. That makes it self-correcting against friction: every
+        // frame it works from rb's real, friction-reduced velocity and fights
+        // back up, which is what re-asserting full speed used to do, without
+        // also erasing whatever else is acting on the body.
+        let desired_vx = 0
+        let desired_vz = 0
+        if (dlen > 0) {
+            desired_vx = dir_x / dlen * cap
+            desired_vz = dir_z / dlen * cap
+        }
+
+        let dvx = desired_vx - rb.vx
+        let dvz = desired_vz - rb.vz
+        let dmag = sqrt(dvx * dvx + dvz * dvz)
+        if (dmag > accel) {
+            dvx = dvx / dmag * accel
+            dvz = dvz / dmag * accel
+        }
+
+        rb.vx = rb.vx + dvx
+        rb.vz = rb.vz + dvz
+    } else {
+        // In the air -- or sliding out a fast landing -- only ever *add* speed
+        // along the direction being asked for, and only until the velocity
+        // already pointing that way reaches the cap. Nothing here can slow the
+        // body down.
+        //
+        // This is the whole reason a rocket jump goes anywhere. Steering toward
+        // a target the way the grounded branch does would treat the cap as a
+        // ceiling on the blast too: launched sideways at 20 m/s, holding the
+        // key pointing that way, the "steer" is a 10 m/s correction *backwards*
+        // and the jump gets braked to a walk in the first second of flight.
+        // Releasing the key was no better -- the target became zero and it
+        // braked harder. Capping only the component along the key direction
+        // leaves the rest of the velocity untouched, so the arc is ballistic.
+        //
+        // It also makes mid-air steering worth doing: because a key at right
+        // angles to your travel starts from ~0 along its own axis, it gets full
+        // acceleration, and you can curve a jump without paying any speed for it.
+        if (dlen > 0) {
+            let wx = dir_x / dlen
+            let wz = dir_z / dlen
+            let along = rb.vx * wx + rb.vz * wz
+            let room = cap - along
+            if (room > 0) {
+                let add = accel
+                if (add > room) { add = room }
+                rb.vx = rb.vx + wx * add
+                rb.vz = rb.vz + wz * add
+            }
+        }
+    }
+
+    // Vertical is untouched except for the jump impulse -- gravity and any
+    // explosion knockback are left to govern it purely physically.
+    if (key("space") and grounded) {
+        rb.vy = jump_velocity
+    }
 
     // Camera rides one unit above the capsule centre, reading the live body
     // position so it doesn't lag a frame behind the physics step.

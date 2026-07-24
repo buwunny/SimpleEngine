@@ -79,6 +79,9 @@ void ScriptHost::bindBuiltins(cowscript::Script &script)
     script.setBuiltin("self_apply_force", [this](const std::vector<Value> &a) { return builtinSelfApplyForce(a); });
     script.setBuiltin("self_set_velocity", [this](const std::vector<Value> &a) { return builtinSelfSetVelocity(a); });
     script.setBuiltin("self_on_ground", [this](const std::vector<Value> &a) { return builtinSelfOnGround(a); });
+    script.setBuiltin("self_set_friction", [this](const std::vector<Value> &a) { return builtinSelfSetFriction(a); });
+    script.setBuiltin("self_collided", [this](const std::vector<Value> &a) { return builtinSelfCollided(a); });
+    script.setBuiltin("self_explode", [this](const std::vector<Value> &a) { return builtinSelfExplode(a); });
 
     script.setBuiltin("spawn_cube", [this](const std::vector<Value> &a) { return builtinSpawn(a, "cube"); });
     script.setBuiltin("spawn_cow", [this](const std::vector<Value> &a) { return builtinSpawn(a, "cow"); });
@@ -274,6 +277,68 @@ Value ScriptHost::builtinSelfOnGround(const std::vector<Value> &)
     btCollisionWorld::ClosestRayResultCallback cb(start, end);
     phys->rayTest(start, end, cb);
     return Value::makeBool(cb.hasHit());
+}
+
+// self_set_friction(f) — set this body's Coulomb friction coefficient.
+//
+// Exists because friction is the part of a landing the movement script cannot
+// otherwise reach, and on a fast landing it dwarfs everything the script does:
+// the solver resolves the touchdown penetration with a large normal impulse and
+// friction scales with it, so a 17 m/s slide loses ~6 m/s in the *single* frame
+// of contact — several times what a full second of script deceleration costs.
+Value ScriptHost::builtinSelfSetFriction(const std::vector<Value> &args)
+{
+    if (!sceneRef || selfEntity == ecs::NullEntity) return Value::makeNull();
+    auto *p = sceneRef->registry().try_get<ecs::Physics>(selfEntity);
+    if (!p || !p->body) return Value::makeNull();
+    double f = args.empty() ? 0.0 : args[0].toNumber();
+    if (!(f >= 0.0)) // also catches NaN
+        f = 0.0;
+    p->body->setFriction(static_cast<btScalar>(f));
+    return Value::makeNull();
+}
+
+// General "did I touch anything" check, via Bullet's contact manifolds rather
+// than a fixed-direction raycast -- catches side/ceiling hits self_on_ground
+// can't see.
+Value ScriptHost::builtinSelfCollided(const std::vector<Value> &)
+{
+    if (!sceneRef || selfEntity == ecs::NullEntity) return Value::makeBool(false);
+    auto *p = sceneRef->registry().try_get<ecs::Physics>(selfEntity);
+    if (!p || !p->body) return Value::makeBool(false);
+    PhysicsWorld *phys = sceneRef->physicsWorld();
+    if (!phys) return Value::makeBool(false);
+    return Value::makeBool(phys->hasContacts(p->body.get()));
+}
+
+// self_explode(radius, speed, up_bias, spin) — detonate at this object's own
+// position. Every argument is optional and falls back to BlastParams' defaults.
+Value ScriptHost::builtinSelfExplode(const std::vector<Value> &args)
+{
+    // Suppressed on a networked client for the same reason as spawn and
+    // destroy: the server is authoritative for what happens to the world, and
+    // it replicates each blast back as an Explosion event. Letting the script
+    // also fire one locally would double every knockback the client predicts.
+    if (!spawnEnabled) return Value::makeNull();
+    if (!sceneRef || selfEntity == ecs::NullEntity) return Value::makeNull();
+    auto *p = sceneRef->registry().try_get<ecs::Physics>(selfEntity);
+    if (!p || !p->body) return Value::makeNull();
+
+    const btVector3 &origin = p->body->getWorldTransform().getOrigin();
+    glm::vec3 pos(origin.x(), origin.y(), origin.z());
+
+    PhysicsWorld::BlastParams params;
+    if (args.size() > 0)
+        params.radius = static_cast<float>(args[0].toNumber());
+    if (args.size() > 1)
+        params.speed = static_cast<float>(args[1].toNumber());
+    if (args.size() > 2)
+        params.upBias = static_cast<float>(args[2].toNumber());
+    if (args.size() > 3)
+        params.spin = static_cast<float>(args[3].toNumber());
+
+    sceneRef->explode(pos, params);
+    return Value::makeNull();
 }
 
 Value ScriptHost::builtinSpawn(const std::vector<Value> &args, const std::string &kind)

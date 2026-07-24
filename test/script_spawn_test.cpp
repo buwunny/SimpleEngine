@@ -9,6 +9,8 @@
 //   * on start() fires for a script attached after startScripts() has run
 //   * several objects can be alive at once, each despawning on its own clock
 //     (the regression: shoot_cow used to destroy the previous cow on every shot)
+//   * Scene::explode pushes bodies by a velocity change rather than a flat
+//     impulse, so the same blast is correctly tuned whatever the target weighs
 //   * scripts that spawn/attach/destroy during updateScripts() don't corrupt the
 //     iteration over the ScriptComponent pool
 
@@ -112,7 +114,7 @@ static void testShotIsCentred()
     float offAxis = glm::degrees(std::acos(glm::clamp(glm::dot(glm::normalize(toCow), front), -1.0f, 1.0f)));
     printf("  shot lands %.3f m ahead, %.4f deg off the view axis\n", distance, offAxis);
     CHECK(offAxis < 0.01f);                      // dead centre (was ~2.55 deg)
-    CHECK(std::fabs(distance - 2.0f) < 0.01f);   // at the script's `muzzle` distance
+    CHECK(std::fabs(distance - 1.5f) < 0.01f);   // at the script's `muzzle` distance
 
     // The collision hull is sized for the cow the player can see, not the
     // full-size model — the scale reaches Bullet at spawn, not a frame later.
@@ -123,9 +125,218 @@ static void testShotIsCentred()
     CHECK(hi.x() - lo.x() < 1.2f);
 }
 
+// Scene::explode's blast model: that its strength is set by distance alone and
+// not by what the target weighs, that it falls off, and that it tilts upward.
+static void testBlast()
+{
+    PhysicsWorld physics;
+    Scene scene;
+    // No scene geometry on purpose: an empty world means nothing can occlude
+    // the blast, so these numbers are the falloff curve and nothing else.
+    scene.addRigidBodiesToWorld(physics);
+
+    // Two cubes side by side at the same distance from the blast, differing
+    // only in mass by a factor of 100.
+    const glm::vec3 blastAt(0.0f, 0.0f, 0.0f);
+    ecs::Entity light = ecs::createCube(scene.registry(), &physics, 1,
+                                        glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)),
+                                        glm::vec4(1.0f), 1.0f);
+    ecs::Entity heavy = ecs::createCube(scene.registry(), &physics, 1,
+                                        glm::translate(glm::mat4(1.0f), glm::vec3(-2.0f, 0.0f, 0.0f)),
+                                        glm::vec4(1.0f), 100.0f);
+    // Four times as far out as the other two, to read the falloff.
+    ecs::Entity far = ecs::createCube(scene.registry(), &physics, 1,
+                                      glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 4.0f)),
+                                      glm::vec4(1.0f), 1.0f);
+
+    PhysicsWorld::BlastParams params; // radius 6, speed 20, upBias 0.35
+    scene.explode(blastAt, params);
+
+    auto velocityOf = [&scene](ecs::Entity e) {
+        const btVector3 &v = scene.registry().get<ecs::Physics>(e).body->getLinearVelocity();
+        return glm::vec3(v.x(), v.y(), v.z());
+    };
+    glm::vec3 vLight = velocityOf(light);
+    glm::vec3 vHeavy = velocityOf(heavy);
+    glm::vec3 vFar = velocityOf(far);
+
+    printf("  blast: light |v|=%.2f heavy |v|=%.2f far |v|=%.2f\n",
+           glm::length(vLight), glm::length(vHeavy), glm::length(vFar));
+
+    // The regression this guards: the blast used to hand Bullet a flat impulse,
+    // so the velocity it produced was divided by mass and these two differed by
+    // 100x — one number could not be right for the player and for debris.
+    CHECK(std::fabs(glm::length(vLight) - glm::length(vHeavy)) < 0.01f);
+
+    // Expected magnitude at d=2, r=6: speed * (1 - (2/6)^2). Read from params
+    // rather than written out, so retuning the blast doesn't fail the curve.
+    const float expected = params.speed * (1.0f - (2.0f / 6.0f) * (2.0f / 6.0f));
+    CHECK(std::fabs(glm::length(vLight) - expected) < 0.01f);
+
+    // Falloff: four times the distance, much less push, still non-zero.
+    CHECK(glm::length(vFar) < glm::length(vLight));
+    CHECK(glm::length(vFar) > 0.0f);
+
+    // Pushed away from the centre, and tilted upward even though both cubes sit
+    // at exactly the blast's own height — this is what makes a floor-level
+    // blast beside you a launch instead of a shove into the floor.
+    CHECK(vLight.x > 0.0f);
+    CHECK(vHeavy.x < 0.0f);
+    CHECK(vLight.y > 0.0f);
+    CHECK(vHeavy.y > 0.0f);
+
+    // Nothing outside the radius is touched at all.
+    ecs::Entity outside = ecs::createCube(scene.registry(), &physics, 1,
+                                          glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 50.0f)),
+                                          glm::vec4(1.0f), 1.0f);
+    scene.explode(blastAt, params);
+    CHECK(glm::length(velocityOf(outside)) == 0.0f);
+}
+
+// The rocket jump end to end: the real player_movement.cow driving the real
+// player capsule, launched by a real blast. Both things this checks are
+// properties of the *pair* — the blast can only launch the player as far as the
+// movement script lets it keep.
+static void testRocketJump()
+{
+    PhysicsWorld physics;
+    Scene scene;
+    // A bare floor. populateDefault drops loose cubes down the Y axis, and they
+    // would land on the player in the middle of a measurement.
+    ecs::createPlane(scene.registry(), nullptr, 1000, 1000, glm::mat4(1.0f), glm::vec4(1.0f), 0.0f);
+    scene.addRigidBodiesToWorld(physics);
+
+    Camera camera(glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    ecs::Entity player = ecs::createPlayer(scene.registry(), &physics, &camera,
+                                           glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 1.0f, 0.0f)));
+    scene.registry().get<ecs::Identity>(player).scriptPaths = {"scripts/player_movement.cow"};
+    auto &input = scene.registry().emplace<ecs::PlayerInput>(player);
+
+    double t = 0.0;
+    ScriptHost host;
+    host.setContext(&scene, nullptr);
+    host.setTime(t);
+    host.setDelta(0.0);
+    scene.loadScripts(host);
+    scene.startScripts(host);
+
+    const float dt = 1.0f / 60.0f;
+    auto *body = scene.registry().get<ecs::Physics>(player).body.get();
+    auto posY = [&] { return body->getWorldTransform().getOrigin().y(); };
+    auto horizontalSpeed = [&] {
+        const btVector3 &v = body->getLinearVelocity();
+        return std::sqrt(v.x() * v.x() + v.z() * v.z());
+    };
+    auto settle = [&] {
+        input.keys = 0;
+        for (int i = 0; i < 60; ++i)
+            step(scene, physics, host, t, dt);
+    };
+
+    // Baseline: how high the plain jump in player_movement.cow reaches.
+    settle();
+    float ground = posY();
+    input.keys = 1ull << ecs::inputKeyBit("space");
+    step(scene, physics, host, t, dt);
+    input.keys = 0;
+    float jumpPeak = ground;
+    for (int i = 0; i < 120; ++i)
+    {
+        step(scene, physics, host, t, dt);
+        if (posY() > jumpPeak)
+            jumpPeak = posY();
+    }
+    const float jumpHeight = jumpPeak - ground;
+
+    // The rocket jump: a blast at the player's feet, no jump key at all.
+    settle();
+    ground = posY();
+    PhysicsWorld::BlastParams params;
+    scene.explode(glm::vec3(0.0f, ground - 1.0f, 0.0f), params);
+    float blastPeak = ground;
+    for (int i = 0; i < 240; ++i)
+    {
+        step(scene, physics, host, t, dt);
+        if (posY() > blastPeak)
+            blastPeak = posY();
+    }
+    const float blastHeight = blastPeak - ground;
+
+    printf("  jump height = %.2f m, rocket jump = %.2f m (%.1fx)\n",
+           jumpHeight, blastHeight, blastHeight / jumpHeight);
+    CHECK(jumpHeight > 2.0f && jumpHeight < 3.5f); // the plain jump still works
+    CHECK(blastHeight > 3.0f * jumpHeight);        // and the blast clearly beats it
+
+    // Horizontal momentum has to survive the flight. The movement script caps
+    // what the *keys* can reach at max_speed (10), and the regression being
+    // guarded is the script treating that as a ceiling on the body itself and
+    // braking a launch back down to a walk in mid-air.
+    settle();
+    scene.explode(glm::vec3(3.0f, posY(), 0.0f), params); // off to one side
+    // Measured once clear of the ground: the grounded branch legitimately
+    // applies friction-fighting steering, and for a frame or two after the
+    // blast the ground ray still hits.
+    for (int i = 0; i < 10; ++i)
+        step(scene, physics, host, t, dt);
+    const float launchSpeed = horizontalSpeed();
+    // Sampled again while still airborne. A sideways blast is mostly sideways,
+    // so this one only buys about half a second of hang time.
+    for (int i = 0; i < 12; ++i) // no keys held throughout
+        step(scene, physics, host, t, dt);
+    const float midflightSpeed = horizontalSpeed();
+
+    printf("  launched sideways at %.2f m/s, still %.2f m/s later in the arc\n",
+           launchSpeed, midflightSpeed);
+    CHECK(launchSpeed > 12.0f);                  // the sideways push landed
+    CHECK(midflightSpeed > launchSpeed - 0.01f); // and nothing bled it off
+
+    // Landing must not scrub that speed off instantly. Before land_grace the
+    // grounded branch braked anything over the cap at the full ground
+    // acceleration — 100 m/s² on top of friction, which stopped a 17 m/s slide
+    // dead in about an eighth of a second and made chaining jumps impossible.
+    //
+    // Sampled inside the window, because friction is deliberately left alone:
+    // the capsule's own μ≈1 against gravity bleeds ~19.6 m/s per second no
+    // matter what the script does, so a slide always ends within about a second
+    // and a late sample would read zero either way. What is under test is that
+    // the *script* has stopped adding a brake of its own on top.
+    float prevY = posY();
+    bool landed = false;
+    for (int i = 0; i < 120 && !landed; ++i)
+    {
+        step(scene, physics, host, t, dt);
+        if (posY() >= prevY - 1e-4f) // stopped descending: touchdown
+            landed = true;
+        prevY = posY();
+    }
+    CHECK(landed);
+    const float touchdownSpeed = horizontalSpeed();
+    for (int i = 0; i < 12; ++i) // 0.2 s, inside the 0.35 s window
+        step(scene, physics, host, t, dt);
+    const float slideSpeed = horizontalSpeed();
+
+    printf("  touched down at %.2f m/s, still %.2f m/s 0.2 s into the slide\n",
+           touchdownSpeed, slideSpeed);
+    // Landing used to cost ~6 m/s in the contact frame alone, on top of the
+    // script braking the rest away within an eighth of a second.
+    CHECK(touchdownSpeed > 15.0f);
+    CHECK(slideSpeed > 12.0f);
+
+    // ...and the window has to shut again. Both halves of it — the momentum
+    // rule and the lowered friction — are gated on being over the cap, so a
+    // player who keeps no keys held must still come to a stop rather than
+    // sliding forever on ice.
+    for (int i = 0; i < 180; ++i) // 3 s, no keys held
+        step(scene, physics, host, t, dt);
+    printf("  3 s later, at rest: %.2f m/s\n", horizontalSpeed());
+    CHECK(horizontalSpeed() < 0.5f);
+}
+
 int main()
 {
     testShotIsCentred();
+    testBlast();
+    testRocketJump();
 
     PhysicsWorld physics;
     Scene scene;
@@ -152,7 +363,14 @@ int main()
             "let next_shot = 0\n"
             "on update(dt) {\n"
             "    if (fired < 3 and time() >= next_shot) {\n"
-            "        let cow = spawn_cow(0, 5, 0)\n"
+            // Each cow gets clear air, because despawn_after.cow now ends a cow
+            // on impact as well as on the clock and this section is about the
+            // clock. High: from 5 m they would all hit the ground within a
+            // second; from 500 m they are still ~86 m up when the last expires.
+            // Spread out: these are unscaled cows, 10.44 m of mesh each, and
+            // dropped down a single column they are barely a second apart in
+            // free fall — the second cow spawns straight into the first.
+            "        let cow = spawn_cow(fired * 50, 500, 0)\n"
             "        attach_script(cow, \"scripts/despawn_after.cow\")\n"
             "        fired = fired + 1\n"
             "        next_shot = time() + 1\n"
@@ -170,8 +388,8 @@ int main()
     const float dt = 0.1f;
 
     // 0.0s: first shot. 1.0s: second. 2.0s: third. despawn_after.cow gives each
-    // cow 4 seconds, so all three are airborne together at t≈2.5 — the whole
-    // point of moving the lifetime onto the cow.
+    // cow 4 seconds from spawn if it hits nothing, so all three are airborne
+    // together at t≈2.5 — the whole point of moving the lifetime onto the cow.
     for (int i = 0; i < 25; ++i)
         step(scene, physics, host, t, dt);
     printf("  t=%.1f live cows = %d (expect 3 coexisting)\n", t, liveCows(scene));
