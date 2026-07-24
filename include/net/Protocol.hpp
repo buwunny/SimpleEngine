@@ -22,12 +22,15 @@ namespace net
 {
     // Bumped to 2 for the shared-physics/despawn generation, 4 for player names,
     // 5 for replicated explosions (an old client would decode MsgType 9 as
-    // garbage and drop the connection's framing).
+    // garbage and drop the connection's framing), 6 for velocity back on
+    // EntityState (grows every Snapshot entity from 32 to 44 bytes — an old
+    // client/server on the previous stride would misparse the entity array
+    // after the first entry instead of just reading a stale field).
     // The server refuses a ClientHello whose version doesn't match, so a stale
     // binary (an old server left holding the port, or a browser-cached old
     // client) is rejected loudly instead of silently interoperating and
     // producing duplicate/ghost objects.
-    inline constexpr uint16_t kProtocolVersion = 5;
+    inline constexpr uint16_t kProtocolVersion = 6;
 
     // Longest player name the server will keep; anything longer is truncated.
     // Nametags are drawn in the world above a player's head, so this is a

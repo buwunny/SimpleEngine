@@ -263,13 +263,29 @@ namespace net
 
         // Moderate error: nudge a fraction of the way toward the server position
         // each snapshot instead of snapping, so the first-person camera glides to
-        // the corrected spot over a few frames. Velocity is left to local
-        // prediction so player input stays responsive.
+        // the corrected spot over a few frames.
         glm::vec3 corrected = glm::mix(curPos, s.pos, correctionRate_);
         xf.setOrigin(btVector3(corrected.x, corrected.y, corrected.z));
         p->body->setWorldTransform(xf);
         if (p->motion)
             p->motion->setWorldTransform(xf);
+
+        // Velocity gets the same nudge. Grounded movement is driven by input
+        // every frame (player_movement.cow re-derives rb.vx/vz from the keys
+        // held right now), so a partial velocity correction here is invisible
+        // by the next tick and input stays responsive. Airborne movement is
+        // the opposite: after an explosion the script deliberately leaves
+        // velocity to gravity + the blast alone, so with position-only
+        // correction any client/server mismatch in the blast (falloff/direction
+        // computed from whatever position each side happened to be predicting
+        // at the moment) never converges -- the body keeps flying its own
+        // slightly-wrong arc and gets yanked back toward the server's arc every
+        // snapshot for the whole flight. That constant tug is what reads as
+        // "laggy" flight. Blending velocity too lets the arc itself converge,
+        // so the position correction shrinks and eventually stops.
+        const btVector3 curVel = p->body->getLinearVelocity();
+        glm::vec3 correctedVel = glm::mix(glm::vec3(curVel.x(), curVel.y(), curVel.z()), s.vel, correctionRate_);
+        p->body->setLinearVelocity(btVector3(correctedVel.x, correctedVel.y, correctedVel.z));
         p->body->activate(true);
     }
 

@@ -63,8 +63,7 @@ namespace net
                 w.u32(e.netId);
                 w.vec3(e.pos);
                 w.quat(e.rot);
-                // Velocity is intentionally NOT sent: remote/scene bodies are
-                // interpolated by position, and it's dead weight per entity.
+                w.vec3(e.vel);
             }
         }
         void writeBody(ByteWriter &w, const PlayerJoin &m)
@@ -156,7 +155,7 @@ namespace net
                 e.netId = r.u32();
                 e.pos = r.vec3();
                 e.rot = r.quat();
-                // vel not on the wire (see writeBody); leave default 0.
+                e.vel = r.vec3();
                 m.entities.push_back(e);
             }
             out = m;

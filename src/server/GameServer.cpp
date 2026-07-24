@@ -280,11 +280,13 @@ net::Snapshot GameServer::buildSnapshot(uint32_t ackSeq) const
         const btVector3 &o = xf.getOrigin();
         const btQuaternion q = xf.getRotation();
 
+        const btVector3 &v = p.body->getLinearVelocity();
+
         net::EntityState es;
         es.netId = view.get<const ecs::NetId>(e).id;
         es.pos = {o.x(), o.y(), o.z()};
         es.rot = glm::quat(q.w(), q.x(), q.y(), q.z());
-        // es.vel left default: velocity is no longer replicated (see Protocol).
+        es.vel = {v.x(), v.y(), v.z()};
 
         // For player entities the upright capsule body carries no meaningful
         // yaw, so replace the rotation with the player's look heading: a
