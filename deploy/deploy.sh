@@ -86,8 +86,12 @@ ssh "$TARGET" "chmod +x '$REMOTE_DIR/install-certs.sh'"
 # .env holds host-specific secrets (TLS_DIR, join key) — seed it once, then only
 # rewrite the image pins so a redeploy never clobbers the operator's settings.
 rc=0
-ssh "$TARGET" bash -s -- "$REMOTE_DIR" "$SERVER_IMAGE" "$SIDECAR_IMAGE" \
-                         "$WANT_SERVER" "$WANT_SIDECAR" "$REGISTRY" <<'REMOTE' || rc=$?
+# ssh joins multiple command-line args with plain spaces before the remote
+# shell re-splits them, so an empty arg (REGISTRY, by default) just vanishes
+# instead of arriving as ''. Pre-quote with %q and pass one string instead.
+remote_args="$(printf '%q ' "$REMOTE_DIR" "$SERVER_IMAGE" "$SIDECAR_IMAGE" \
+                           "$WANT_SERVER" "$WANT_SIDECAR" "$REGISTRY")"
+ssh "$TARGET" "bash -s -- $remote_args" <<'REMOTE' || rc=$?
 set -euo pipefail
 dir="$1"; server_image="$2"; sidecar_image="$3"
 want_server="$4"; want_sidecar="$5"; registry="$6"
