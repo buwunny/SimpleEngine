@@ -60,6 +60,10 @@ private:
 
     void spawnPlayer(Session &s);
     void despawnPlayer(Session &s);
+    // A plate (or any script) called reset_scene() this tick. Rebuilds the
+    // world from the scene as loaded, sparing every connected player, and
+    // puts each of them back at their spawn point. See Scene::requestReset.
+    void applyPendingReset();
     net::Snapshot buildSnapshot(uint32_t ackSeq) const;
     // Assign NetIds to newly script-spawned bodies and broadcast SpawnEntity so
     // clients build a visual for each. Called once per tick after scripts run.

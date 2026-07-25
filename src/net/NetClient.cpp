@@ -349,7 +349,12 @@ namespace net
         auto it = reps_.find(netId);
         if (it == reps_.end())
             return;
-        if (it->second.ownsEntity && scene_->registry().valid(it->second.entity))
+        // Always tear down the entity, not just proxies/avatars we created
+        // (ownsEntity). A claimed scene object (ownsEntity=false) only gets a
+        // DespawnEntity when the server rebuilt the world out from under it
+        // (a scene reset) — the old entity has to go, since a fresh one is on
+        // its way via SpawnEntity.
+        if (scene_->registry().valid(it->second.entity))
             scene_->destroyEntity(it->second.entity);
         reps_.erase(it);
     }

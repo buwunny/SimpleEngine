@@ -12,11 +12,13 @@ class Camera;
 class Window;
 class Shader;
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -96,6 +98,11 @@ public:
         resetRequested_ = false;
         return r;
     }
+
+    // Entities to spare from teardown on the next load/reset, in addition to
+    // playerEntity_. For an owner that tracks several player entities itself
+    // instead of going through addPlayer() (GameServer, one per session).
+    void setSparedEntities(std::vector<ecs::Entity> e) { sparedEntities_ = std::move(e); }
 
     void addPlayer(Camera *camera, const glm::mat4 &model, Window *window, PhysicsWorld &physics);
     ecs::Entity getPlayerEntity() const { return playerEntity_; }
@@ -188,10 +195,17 @@ public:
     ecs::EntityHandle handle(ecs::Entity e) { return ecs::EntityHandle(&reg_, e); }
 
 private:
+    bool isSpared(ecs::Entity e) const
+    {
+        return e == playerEntity_ ||
+               std::find(sparedEntities_.begin(), sparedEntities_.end(), e) != sparedEntities_.end();
+    }
+
     ecs::Registry reg_;
     ecs::Entity playerEntity_ = ecs::NullEntity;
     ecs::Entity selectedEntity_ = ecs::NullEntity;
     ecs::Entity hoveredEntity_ = ecs::NullEntity;
+    std::vector<ecs::Entity> sparedEntities_;
 
     std::string scenePath_;
     std::filesystem::file_time_type lastWriteTime_;

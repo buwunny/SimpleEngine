@@ -215,7 +215,7 @@ bool Scene::loadFromJSON(const std::string &path)
         auto view = reg_.view<ecs::Physics>();
         for (auto e : view)
         {
-            if (e == playerEntity_)
+            if (isSpared(e))
                 continue;
             auto &p = view.get<ecs::Physics>(e);
             if (p.body)
@@ -227,7 +227,7 @@ bool Scene::loadFromJSON(const std::string &path)
         std::vector<ecs::Entity> toDestroy;
         auto view = reg_.view<ecs::Identity>();
         for (auto e : view)
-            if (e != playerEntity_)
+            if (!isSpared(e))
                 toDestroy.push_back(e);
         for (auto e : toDestroy)
             reg_.destroy(e);

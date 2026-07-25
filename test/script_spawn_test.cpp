@@ -268,6 +268,45 @@ static void testOtherPlates(const char *script, const char *expectLabel,
     (void)weight;
 }
 
+// Scene::setSparedEntities: GameServer has no single playerEntity_ (it owns one
+// player entity per session), so a multiplayer scene reset relies entirely on
+// this to keep every connected player alive across resetToInitial() while
+// everything else is torn down and rebuilt from the loaded JSON.
+static void testMultiEntitySpare()
+{
+    PhysicsWorld physics;
+    Scene scene;
+    const std::string json = R"({
+        "objects": [
+            {"type": "Cube", "size": 1, "position": [1, 0, 0], "mass": 1.0},
+            {"type": "Cube", "size": 1, "position": [-1, 0, 0], "mass": 1.0}
+        ]
+    })";
+    CHECK(scene.loadFromString(json));
+    scene.addRigidBodiesToWorld(physics);
+    CHECK(scene.registry().view<ecs::Physics>().size() == 2);
+
+    // Two stand-ins for the player entities GameServer tracks per session.
+    Camera cam1(glm::vec3(0.0f), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    Camera cam2(glm::vec3(0.0f), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    ecs::Entity p1 = ecs::createPlayer(scene.registry(), &physics, &cam1, glm::mat4(1.0f));
+    ecs::Entity p2 = ecs::createPlayer(scene.registry(), &physics, &cam2, glm::mat4(1.0f));
+
+    scene.setSparedEntities({p1, p2});
+    scene.resetToInitial();
+    scene.setSparedEntities({});
+
+    CHECK(scene.registry().valid(p1));
+    CHECK(scene.registry().valid(p2));
+
+    int cubesAfter = 0;
+    for (auto e : scene.registry().view<ecs::Physics, ecs::Identity>())
+        if (e != p1 && e != p2)
+            ++cubesAfter;
+    printf("  multi-entity spare: both players survived, %d cube(s) rebuilt\n", cubesAfter);
+    CHECK(cubesAfter == 2); // rebuilt fresh from the same JSON, not left destroyed
+}
+
 // Scene::explode's blast model: that its strength is set by distance alone and
 // not by what the target weighs, that it falls off, and that it tilts upward.
 static void testBlast()
@@ -483,6 +522,7 @@ int main()
     testButton();
     testOtherPlates("scripts/plate_spawn.cow", "CUBE DISPENSER", true, false);
     testOtherPlates("scripts/plate_reset.cow", "RESET SCENE", false, true);
+    testMultiEntitySpare();
 
     PhysicsWorld physics;
     Scene scene;

@@ -161,6 +161,57 @@ void GameServer::despawnPlayer(Session &s)
     s.spawned = false;
 }
 
+void GameServer::applyPendingReset()
+{
+    if (!scene_.consumeResetRequest())
+        return;
+
+    // Spare every connected player's entity — Scene only tracks a single
+    // playerEntity_ (for the client's own local player), but GameServer owns
+    // one per session, so it has to hand the whole list in itself.
+    std::vector<ecs::Entity> alive;
+    for (auto &[id, s] : sessions_)
+        if (s.spawned)
+            alive.push_back(s.entity);
+    scene_.setSparedEntities(alive);
+    scene_.resetToInitial();
+    scene_.setSparedEntities({});
+
+    // Recompile + restart every script, same as the client's reset — the
+    // spared players keep their entity/NetId, but their scripts (movement,
+    // shoot cooldown, ...) go back to a fresh on start() too.
+    scriptTime_ = 0.0;
+    scene_.resetScripts();
+    scene_.loadScripts(host_);
+    host_.setTime(0.0);
+    host_.setDelta(0.0);
+    scene_.startScripts(host_);
+
+    // Put every surviving player back at their spawn point, same placement
+    // spawnPlayer uses, with velocity cleared — a reset that rebuilt the
+    // world but left everyone wherever they were standing is only half of one.
+    for (auto &[id, s] : sessions_)
+    {
+        if (!s.spawned || !scene_.registry().valid(s.entity))
+            continue;
+        auto *p = scene_.registry().try_get<ecs::Physics>(s.entity);
+        if (!p || !p->body)
+            continue;
+        float offset = static_cast<float>(s.netId % 8) * 2.0f;
+        btTransform xf;
+        xf.setIdentity();
+        xf.setOrigin(btVector3(offset, 3.0f, 10.0f));
+        p->body->setWorldTransform(xf);
+        if (p->motion)
+            p->motion->setWorldTransform(xf);
+        p->body->setLinearVelocity(btVector3(0, 0, 0));
+        p->body->setAngularVelocity(btVector3(0, 0, 0));
+        p->body->activate(true);
+    }
+
+    std::cout << "GameServer: scene reset\n";
+}
+
 void GameServer::onConnect(uint32_t session)
 {
     // Register the session; the player entity is created when ClientHello
@@ -346,9 +397,12 @@ void GameServer::onNetIdDestroyed(ecs::Registry &reg, ecs::Entity e)
 {
     // Fires while the entity is being destroyed; the NetId is still readable.
     // Player entities also carry a NetId, but their removal is announced via
-    // PlayerLeave, so only queue runtime-spawned objects here.
+    // PlayerLeave, so exclude only that range. Base-scene dynamic objects
+    // (netId < kPlayerNetIdBase) are never destroyed outside of a scene
+    // reset, but when that does happen clients need to hear about it same as
+    // a runtime-spawned object going away.
     uint32_t netId = reg.get<ecs::NetId>(e).id;
-    if (netId >= net::kSpawnNetIdBase)
+    if (netId < net::kPlayerNetIdBase || netId >= net::kSpawnNetIdBase)
         pendingDespawns_.push_back(netId);
 }
 
@@ -447,6 +501,11 @@ void GameServer::tick(float dt)
     host_.setTime(scriptTime_);
     host_.setDelta(dt);
     scene_.updateScripts(host_, dt);
+
+    // A plate (or any script) may have called reset_scene() this tick. Acted
+    // on here, after scripts have finished running for the frame — see
+    // Scene::requestReset for why it can't happen mid-iteration.
+    applyPendingReset();
 
     // Pick up anything the scripts spawned and tell the clients about it, then
     // announce anything they destroyed (e.g. shoot_cow despawning old cows).
