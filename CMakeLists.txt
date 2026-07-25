@@ -242,6 +242,36 @@ if(BUILD_SERVER)
         glm::glm nlohmann_json::nlohmann_json
         BulletDynamics BulletCollision LinearMath EnTT::EnTT)
 
+    # Repro harness for repeated Despawn+Spawn cycles on NetClient, as produced
+    # by repeated scene resets -- see test/netclient_reset_repeat_test.cpp.
+    add_executable(cowengine_netclient_reset_repeat_test
+        ${SIM_SOURCES}
+        src/net/NetClient.cpp
+        test/netclient_reset_repeat_test.cpp
+    )
+    target_compile_definitions(cowengine_netclient_reset_repeat_test PRIVATE
+        ENGINE_HEADLESS=1 ENGINE_WITH_EDITOR=0 GLM_ENABLE_EXPERIMENTAL)
+    target_include_directories(cowengine_netclient_reset_repeat_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/include ${BULLET_INCLUDE_DIRS} /usr/include/bullet)
+    target_link_libraries(cowengine_netclient_reset_repeat_test PRIVATE
+        glm::glm nlohmann_json::nlohmann_json
+        BulletDynamics BulletCollision LinearMath EnTT::EnTT)
+
+    # Repro harness for repeated scene resets (reset pressure plate) in
+    # multiplayer -- see test/reset_repeat_test.cpp.
+    add_executable(cowengine_reset_repeat_test
+        ${SIM_SOURCES}
+        src/server/GameServer.cpp
+        test/reset_repeat_test.cpp
+    )
+    target_compile_definitions(cowengine_reset_repeat_test PRIVATE
+        ENGINE_HEADLESS=1 ENGINE_WITH_EDITOR=0 GLM_ENABLE_EXPERIMENTAL)
+    target_include_directories(cowengine_reset_repeat_test PRIVATE
+        ${CMAKE_SOURCE_DIR}/include ${BULLET_INCLUDE_DIRS} /usr/include/bullet)
+    target_link_libraries(cowengine_reset_repeat_test PRIVATE
+        glm::glm nlohmann_json::nlohmann_json
+        BulletDynamics BulletCollision LinearMath EnTT::EnTT)
+
     # Server + test are the only artifacts for this configuration.
     return()
 endif()

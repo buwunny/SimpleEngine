@@ -42,6 +42,11 @@ public:
     // Advance the simulation one fixed step and broadcast a snapshot.
     void tick(float dt);
 
+    // Force a scene reset on the next tick, same as a plate's reset_scene()
+    // call. Exposed for tests that need to drive a reset without physically
+    // walking a player onto a plate.
+    void requestSceneReset() { scene_.requestReset(); }
+
     uint32_t serverTick() const { return serverTick_; }
     size_t playerCount() const { return sessions_.size(); }
 

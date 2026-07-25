@@ -419,18 +419,16 @@
                 deliverToWasm(channel, bytes);
             }
 
-            async function readWholeStream(stream) {
-                var reader = stream.getReader(), chunks = [], total = 0;
-                for (; ;) {
-                    var r = await reader.read();
-                    if (r.done) break;
-                    chunks.push(r.value); total += r.value.length;
-                }
-                var out = new Uint8Array(total), off = 0;
-                for (var i = 0; i < chunks.length; i++) { out.set(chunks[i], off); off += chunks[i].length; }
-                return out;
-            }
 
+            // Reliable messages share one bidirectional stream for the whole
+            // session, each framed as [u32 LE length][payload] -- see the
+            // ordering note at the top of sidecar/src/webtransport.rs. QUIC
+            // only orders bytes within a single stream; a fresh stream per
+            // message (the old approach) gave every message its own
+            // independent ordering, so a burst of reliable sends (a scene
+            // reset firing several Spawn/Despawn in the same tick) could be
+            // *received* out of send order under real network jitter even
+            // though each stream individually arrived intact.
             async function connectWebTransport(url, certHashB64) {
                 var opts = {};
                 if (certHashB64) {
@@ -440,12 +438,17 @@
                 var wt = new WebTransport(url, opts);
                 await wt.ready;
                 var dgWriter = wt.datagrams.writable.getWriter();
+
+                var bi = await wt.createBidirectionalStream();
+                var reliableWriter = bi.writable.getWriter();
+
                 sendFn = async function (channel, bytes) {
                     var copy = bytes.slice(); // detach from wasm HEAPU8 before awaiting
                     if (channel === 1) {
-                        var s = await wt.createUnidirectionalStream();
-                        var w = s.getWriter();
-                        await w.write(copy); await w.close();
+                        var framed = new Uint8Array(4 + copy.length);
+                        new DataView(framed.buffer).setUint32(0, copy.length, true);
+                        framed.set(copy, 4);
+                        await reliableWriter.write(framed);
                     } else {
                         await dgWriter.write(copy);
                     }
@@ -455,11 +458,27 @@
                     try { for (; ;) { var d = await r.read(); if (d.done) break; if (d.value) onMsg(0, new Uint8Array(d.value)); } } catch (e) { }
                 })();
                 (async function () {
-                    var r = wt.incomingUnidirectionalStreams.getReader();
+                    // Read the reliable stream as a continuous byte source and peel
+                    // off complete frames as they accumulate -- a frame's bytes can
+                    // legitimately arrive split across more than one chunk.
+                    var reader = bi.readable.getReader();
+                    var pending = new Uint8Array(0);
+                    function append(chunk) {
+                        var merged = new Uint8Array(pending.length + chunk.length);
+                        merged.set(pending); merged.set(chunk, pending.length);
+                        pending = merged;
+                    }
                     try {
                         for (; ;) {
-                            var s = await r.read(); if (s.done) break;
-                            readWholeStream(s.value).then(function (b) { onMsg(1, b); }).catch(function () { });
+                            var r = await reader.read();
+                            if (r.done) break;
+                            if (r.value) append(r.value);
+                            while (pending.length >= 4) {
+                                var len = new DataView(pending.buffer, pending.byteOffset, 4).getUint32(0, true);
+                                if (pending.length < 4 + len) break;
+                                onMsg(1, pending.slice(4, 4 + len));
+                                pending = pending.slice(4 + len);
+                            }
                         }
                     } catch (e) { }
                 })();

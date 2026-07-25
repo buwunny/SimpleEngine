@@ -3,8 +3,21 @@
 //
 // Browser<->sidecar mapping over WebTransport:
 //   unreliable  <->  QUIC datagrams
-//   reliable    <->  one unidirectional stream per message (stream end delimits
-//                    the message, so no length prefix is needed)
+//   reliable    <->  one bidirectional stream per session, opened by the
+//                    browser, carrying every reliable message as a
+//                    [u32 LE length][payload] frame.
+//
+// It has to be one persistent stream rather than one stream per message: QUIC
+// only orders bytes *within* a stream, not across sibling streams from the
+// same sender. A scene reset fires a burst of SpawnEntity/DespawnEntity in
+// close succession, and under real network jitter the streams for two of
+// them can resolve out of order at the receiver even though each one
+// individually arrived intact — the client would then apply them in the
+// wrong order (e.g. a Spawn for an id landing after a later Despawn of that
+// same id), which is exactly the kind of thing that "mostly works, then
+// glitches" under load. A single stream with explicit framing gives the same
+// in-order, reliable delivery Protocol.hpp's Channel::Reliable already
+// promises the rest of the engine.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -95,6 +108,11 @@ async fn handle(incoming: IncomingSession, relay: Arc<Relay>) -> Result<()> {
 async fn handle_accepted(session_request: SessionRequest, relay: &Arc<Relay>) -> Result<()> {
     let connection = Arc::new(session_request.accept().await?);
 
+    // The browser opens the one bidi stream used for every reliable message
+    // right after connecting (see CowNet in GameTemplate.html). Wait for it
+    // before registering the session, so nothing can try to use it early.
+    let (mut reliable_tx, mut reliable_rx) = connection.accept_bi().await?;
+
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(u8, Vec<u8>)>();
     let session = relay.register(out_tx).await;
     relay.to_server(session, KIND_CONNECT, &[]).await;
@@ -105,16 +123,15 @@ async fn handle_accepted(session_request: SessionRequest, relay: &Arc<Relay>) ->
     let out_task = tokio::spawn(async move {
         while let Some((channel, payload)) = out_rx.recv().await {
             if channel == CH_RELIABLE {
-                // One uni stream per reliable message; finish() delimits it.
-                match conn_out.open_uni().await {
-                    Ok(opening) => match opening.await {
-                        Ok(mut s) => {
-                            let _ = s.write_all(&payload).await;
-                            let _ = s.finish().await;
-                        }
-                        Err(_) => break,
-                    },
-                    Err(_) => break,
+                // Framed onto the one shared reliable stream -- see the
+                // ordering note at the top of this file for why it can't be
+                // a fresh stream per message.
+                let len = (payload.len() as u32).to_le_bytes();
+                if reliable_tx.write_all(&len).await.is_err() {
+                    break;
+                }
+                if reliable_tx.write_all(&payload).await.is_err() {
+                    break;
                 }
             } else if conn_out.send_datagram(&payload).is_err() {
                 // Datagram too large or connection gone; drop (unreliable).
@@ -123,7 +140,7 @@ async fn handle_accepted(session_request: SessionRequest, relay: &Arc<Relay>) ->
     });
 
     // browser -> server
-    let result = pump_incoming(&connection, relay, session).await;
+    let result = pump_incoming(&connection, &mut reliable_rx, relay, session).await;
 
     relay.to_server(session, KIND_DISCONNECT, &[]).await;
     relay.deregister(session).await;
@@ -134,23 +151,23 @@ async fn handle_accepted(session_request: SessionRequest, relay: &Arc<Relay>) ->
 
 async fn pump_incoming(
     connection: &wtransport::Connection,
+    reliable_rx: &mut wtransport::RecvStream,
     relay: &Arc<Relay>,
     session: u32,
 ) -> Result<()> {
-    let mut tmp = vec![0u8; 8192];
+    let mut len_buf = [0u8; 4];
     loop {
         tokio::select! {
             dgram = connection.receive_datagram() => {
                 let dgram = dgram?;
                 relay.to_server(session, KIND_UNRELIABLE, &dgram).await;
             }
-            uni = connection.accept_uni() => {
-                let mut recv = uni?;
-                let mut buf = Vec::new();
-                while let Some(n) = recv.read(&mut tmp).await? {
-                    buf.extend_from_slice(&tmp[..n]);
-                }
-                relay.to_server(session, KIND_RELIABLE, &buf).await;
+            r = reliable_rx.read_exact(&mut len_buf) => {
+                r?;
+                let len = u32::from_le_bytes(len_buf) as usize;
+                let mut payload = vec![0u8; len];
+                reliable_rx.read_exact(&mut payload).await?;
+                relay.to_server(session, KIND_RELIABLE, &payload).await;
             }
         }
     }
