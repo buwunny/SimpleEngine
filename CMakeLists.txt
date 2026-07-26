@@ -103,6 +103,7 @@ set(SOURCES_EDITOR_ONLY
     src/app/EditorUI.cpp
     src/app/CodeEditor.cpp
     src/editor/EditorContext.cpp
+    src/editor/Win95Widgets.cpp
     src/editor/panels/WorkspacePanel.cpp
     src/editor/panels/HierarchyPanel.cpp
     src/editor/panels/InspectorPanel.cpp

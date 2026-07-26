@@ -1,4 +1,5 @@
 #include "editor/panels/FileBrowserPanel.hpp"
+#include "editor/Win95Widgets.hpp"
 
 #include "core/Scene.hpp"
 #include "app/CodeEditor.hpp"
@@ -78,7 +79,7 @@ namespace editor
         if (!loaded)
             refresh(ctx);
 
-        if (ImGui::Button("Refresh"))
+        if (ui95::Button("Refresh"))
             refresh(ctx);
         ImGui::SameLine();
         filter.Draw("##fbfilter", 180.0f);

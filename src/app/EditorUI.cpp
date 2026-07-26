@@ -13,6 +13,7 @@
 #include "editor/panels/RuntimePanel.hpp"
 #include "editor/panels/FileBrowserPanel.hpp"
 #include "editor/panels/VfxPanel.hpp"
+#include "platform/ImGuiLayer.hpp"
 
 #if !defined(COWENGINE_GAME)
 #include "app/GameBuilder.hpp"
@@ -175,6 +176,16 @@ void EditorUI::drawMainMenu()
                 ctx.requestedTab = editor::CodeTab;
             if (ImGui::MenuItem("Help Tab"))
                 ctx.requestedTab = editor::HelpTab;
+            ImGui::Separator();
+            if (ImGui::BeginMenu("Theme"))
+            {
+                const ImGuiLayer::Theme theme = ImGuiLayer::currentTheme();
+                if (ImGui::MenuItem("Windows 95", nullptr, theme == ImGuiLayer::Theme::Win95))
+                    ImGuiLayer::applyTheme(ImGuiLayer::Theme::Win95);
+                if (ImGui::MenuItem("Windows 95 (Dark)", nullptr, theme == ImGuiLayer::Theme::Win95Dark))
+                    ImGuiLayer::applyTheme(ImGuiLayer::Theme::Win95Dark);
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
 #if !defined(COWENGINE_GAME)

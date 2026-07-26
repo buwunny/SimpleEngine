@@ -1,5 +1,6 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "editor/panels/WorkspacePanel.hpp"
+#include "editor/Win95Widgets.hpp"
 
 #include "core/Camera.hpp"
 #include "core/Scene.hpp"
@@ -527,10 +528,10 @@ namespace editor
         if (!codeEditor_)
             return;
 
-        if (ImGui::Button("New"))
+        if (ui95::Button("New"))
             ImGui::OpenPopup("##NewScript");
         ImGui::SameLine();
-        if (ImGui::Button("Open from selection"))
+        if (ui95::Button("Open from selection"))
         {
             ecs::Identity *ident = (ctx.scene && ctx.selection.entity != ecs::NullEntity)
                                        ? ctx.scene->registry().try_get<ecs::Identity>(ctx.selection.entity)
@@ -546,10 +547,10 @@ namespace editor
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Save"))
+        if (ui95::Button("Save"))
             codeEditor_->saveActive();
         ImGui::SameLine();
-        if (ImGui::Button("Apply (recompile)"))
+        if (ui95::Button("Apply (recompile)"))
         {
             if (ctx.scene && ctx.scriptHost && codeEditor_->hasActiveBuffer())
             {
@@ -561,7 +562,7 @@ namespace editor
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Attach to selection"))
+        if (ui95::Button("Attach to selection"))
         {
             if (ctx.scene && ctx.selection.entity != ecs::NullEntity)
             {
@@ -593,8 +594,8 @@ namespace editor
         {
             ImGui::Text("Path for new .cow file:");
             ImGui::SetNextItemWidth(360.0f);
-            ImGui::InputText("##newScriptPath", newScriptName, sizeof(newScriptName));
-            if (ImGui::Button("Create"))
+            ui95::InputText("##newScriptPath", newScriptName, sizeof(newScriptName));
+            if (ui95::Button("Create"))
             {
                 try
                 {
@@ -610,7 +611,7 @@ namespace editor
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel"))
+            if (ui95::Button("Cancel"))
                 ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
@@ -823,7 +824,7 @@ namespace editor
         ImGui::SetNextWindowBgAlpha(0.35f);
         ImGui::Begin("TestingOverlay", nullptr, flags);
         ImGui::TextUnformatted("Testing Mode");
-        if (ImGui::Button("Stop Testing"))
+        if (ui95::Button("Stop Testing"))
             ctx.testingMode = false;
         ImGui::End();
     }

@@ -1,4 +1,5 @@
 #include "editor/panels/HierarchyPanel.hpp"
+#include "editor/Win95Widgets.hpp"
 
 #include "core/Scene.hpp"
 #include "core/PhysicsWorld.hpp"
@@ -47,14 +48,14 @@ namespace editor
 
         const std::string &path = scene->getScenePath();
         ImGui::Text("Scene: %s", path.empty() ? "<unsaved>" : path.c_str());
-        if (ImGui::Button("Reload"))
+        if (ui95::Button("Reload"))
         {
             ctx.clearSelection();
             scene->forceReload();
             ctx.addLog("Scene reload requested.", ImVec4(0.9f, 0.8f, 0.4f, 1.0f));
         }
         ImGui::SameLine();
-        if (ImGui::Button("Save"))
+        if (ui95::Button("Save"))
         {
             std::string savePath = path.empty() ? "scenes/scene.json" : path;
             if (scene->saveToJSON(savePath))

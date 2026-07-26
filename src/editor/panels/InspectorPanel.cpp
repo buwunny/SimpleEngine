@@ -1,4 +1,5 @@
 #include "editor/panels/InspectorPanel.hpp"
+#include "editor/Win95Widgets.hpp"
 
 #include "core/Scene.hpp"
 #include "core/PhysicsWorld.hpp"
@@ -27,7 +28,7 @@ namespace editor
             bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
             float btnW = ImGui::GetFrameHeight();
             ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - btnW - 4.0f);
-            if (ImGui::SmallButton("X"))
+            if (ui95::SmallButton("X"))
                 requestRemove = true;
             ImGui::PopID();
             return open;
@@ -40,7 +41,7 @@ namespace editor
                 return true;
             char nameBuffer[256] = {};
             std::snprintf(nameBuffer, sizeof(nameBuffer), "%s", ident->name.c_str());
-            if (ImGui::InputText("Name", nameBuffer, sizeof(nameBuffer)))
+            if (ui95::InputText("Name", nameBuffer, sizeof(nameBuffer)))
                 ident->name = nameBuffer;
             ImGui::Text("ID: %d", ident->id);
             return true;
@@ -48,11 +49,11 @@ namespace editor
 
         bool drawTransform(Context &ctx, ecs::Entity)
         {
-            if (ImGui::DragFloat3("Position", &ctx.selection.position.x, 0.1f))
+            if (ui95::DragFloat3("Position", &ctx.selection.position.x, 0.1f))
                 ctx.applySelectionTransform();
-            if (ImGui::DragFloat3("Rotation", &ctx.selection.rotation.x, 0.5f))
+            if (ui95::DragFloat3("Rotation", &ctx.selection.rotation.x, 0.5f))
                 ctx.applySelectionTransform();
-            if (ImGui::DragFloat3("Scale", &ctx.selection.scale.x, 0.05f, 0.001f, 1000.0f))
+            if (ui95::DragFloat3("Scale", &ctx.selection.scale.x, 0.05f, 0.001f, 1000.0f))
                 ctx.applySelectionTransform();
             return true;
         }
@@ -77,7 +78,7 @@ namespace editor
                 {
                     char meshBuf[256] = {};
                     std::snprintf(meshBuf, sizeof(meshBuf), "%s", ident->meshPath.c_str());
-                    if (ImGui::InputText("Path", meshBuf, sizeof(meshBuf)))
+                    if (ui95::InputText("Path", meshBuf, sizeof(meshBuf)))
                         ident->meshPath = meshBuf;
                     ImGui::TextDisabled("Reload the scene to apply path changes.");
                 }
@@ -86,7 +87,7 @@ namespace editor
             ImGui::Text("Line width:");
             ImGui::SameLine();
             float lw = static_cast<float>(rd->lineWidth);
-            if (ImGui::DragFloat("##linewidth", &lw, 0.1f, 0.1f, 10.0f))
+            if (ui95::DragFloat("##linewidth", &lw, 0.1f, 0.1f, 10.0f))
                 rd->lineWidth = lw;
             return true;
         }
@@ -99,11 +100,11 @@ namespace editor
             float mass = 0.0f;
             if (p->body->getInvMass() > 0.0f)
                 mass = 1.0f / p->body->getInvMass();
-            if (ImGui::InputFloat("Mass", &mass, 0.1f, 1.0f))
+            if (ui95::InputFloat("Mass", &mass, 0.1f, 1.0f))
                 ecs::setMass(*p, mass);
             btVector3 v = p->body->getLinearVelocity();
             ImGui::Text("Velocity: %.2f %.2f %.2f", v.getX(), v.getY(), v.getZ());
-            ImGui::Checkbox("Show Collider", &ctx.showColliders);
+            ui95::Checkbox("Show Collider", &ctx.showColliders);
             return true;
         }
 
@@ -122,13 +123,13 @@ namespace editor
                 char scriptBuf[256] = {};
                 std::snprintf(scriptBuf, sizeof(scriptBuf), "%s", ident->scriptPaths[i].c_str());
                 ImGui::SetNextItemWidth(-115.0f);
-                if (ImGui::InputText("##path", scriptBuf, sizeof(scriptBuf)))
+                if (ui95::InputText("##path", scriptBuf, sizeof(scriptBuf)))
                 {
                     ident->scriptPaths[i] = scriptBuf;
                     reg.remove<ecs::ScriptComponent>(e);
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Edit"))
+                if (ui95::Button("Edit"))
                 {
                     if (ident->scriptPaths[i].empty())
                         ctx.addLog("Set a script path first (e.g. scripts/spin.cow).",
@@ -137,7 +138,7 @@ namespace editor
                         ctx.openScriptInCodeEditor(ident->scriptPaths[i]);
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("X"))
+                if (ui95::Button("X"))
                     removeIndex = static_cast<int>(i);
                 ImGui::PopID();
             }
@@ -147,7 +148,7 @@ namespace editor
                 reg.remove<ecs::ScriptComponent>(e);
             }
 
-            if (ImGui::Button("+ Add Script"))
+            if (ui95::Button("+ Add Script"))
             {
                 ident->scriptPaths.push_back("scripts/new_script.cow");
                 reg.remove<ecs::ScriptComponent>(e);
@@ -210,7 +211,7 @@ namespace editor
 
         void drawAddComponentPopup(Context &ctx)
         {
-            if (ImGui::Button("+ Add Component"))
+            if (ui95::Button("+ Add Component"))
                 ImGui::OpenPopup("##AddComponent");
 
             if (!ImGui::BeginPopup("##AddComponent"))
@@ -349,7 +350,7 @@ namespace editor
         drawAddComponentPopup(ctx);
 
         ImGui::Separator();
-        if (ImGui::Button("Delete Entity"))
+        if (ui95::Button("Delete Entity"))
         {
             ecs::Entity e = ctx.selection.entity;
             ctx.clearSelection();

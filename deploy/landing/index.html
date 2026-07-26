@@ -7,108 +7,811 @@
   <meta name="description" content="CowEngine — a C++ game engine with a .cow scripting language, Bullet physics, and multiplayer in the browser." />
   <style>
     :root {
-      --bg: #0e0f13;
-      --panel: #161821;
-      --panel-2: #1d2030;
-      --text: #e8eaf0;
-      --muted: #9aa0b4;
-      --accent: #7c9cff;
-      --accent-2: #56d6a0;
-      --border: #262a3a;
+      --pink:   #ff71ce;
+      --cyan:   #01cdfe;
+      --mint:   #05ffa1;
+      --purple: #b967ff;
+      --yellow: #fffb96;
+      --deep:   #16062b;
+      --night:  #2b0b3a;
+
+      /* Windows 95 palette */
+      --face:   #c0c0c0;
+      --light:  #ffffff;
+      --shadow: #808080;
+      --dark:   #0a0a0a;
+      --ink:    #0a0a0a;
+      --title-a:#000080;
+      --title-b:#1084d0;
+
+      --ui: "MS Sans Serif", "Pixelated MS Sans Serif", Tahoma, Verdana, Geneva, sans-serif;
+      --mono: "Courier New", Courier, monospace;
+      --taskbar-h: 40px;
     }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f4f5f8;
-        --panel: #ffffff;
-        --panel-2: #eef0f6;
-        --text: #14161d;
-        --muted: #5a6072;
-        --accent: #3355dd;
-        --accent-2: #17976a;
-        --border: #dfe2ec;
-      }
-    }
+
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
+
     body {
-      background: radial-gradient(1200px 800px at 50% -10%, var(--panel-2), var(--bg) 60%);
-      color: var(--text);
-      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--deep);
+      color: var(--ink);
+      font: 14px/1.5 var(--ui);
       min-height: 100vh;
+      padding: 18px 14px calc(var(--taskbar-h) + 28px);
+      overflow-x: hidden;
+    }
+
+    /* ---------------------------------------------------------------- sky */
+    .sky {
+      position: fixed;
+      inset: 0;
+      z-index: -3;
+      background:
+        radial-gradient(70vw 45vh at 50% 66%, rgba(255,113,206,.35), transparent 70%),
+        linear-gradient(#08010f 0%, #1b0530 40%, #3d0a4e 66%, #6b1259 100%);
+    }
+    .horizon {
+      position: fixed;
+      left: 0; right: 0;
+      bottom: 34vh;
+      height: 2px;
+      background: var(--cyan);
+      box-shadow: 0 0 12px var(--cyan), 0 0 34px rgba(1, 205, 254, .6);
+      z-index: -1;
+    }
+    /* Perspective floor. The vanishing point of `perspective(p) rotateX(a)`
+       sits p/tan(a) above the transform origin, so p is given in vh to keep
+       the grid meeting the horizon at 34vh on any viewport. */
+    .ground {
+      position: fixed;
+      left: 0; right: 0;
+      bottom: 0;
+      height: 34vh;
+      z-index: -2;
+      background: linear-gradient(#15042a, #05010b 70%);
+    }
+    .grid {
+      position: fixed;
+      left: -60%;
+      right: -60%;
+      bottom: 0;
+      height: 120vh;
+      z-index: -2;
+      background-image:
+        repeating-linear-gradient(to right, rgba(1,205,254,.7) 0 2px, transparent 2px 76px),
+        repeating-linear-gradient(to bottom, rgba(255,113,206,.8) 0 2px, transparent 2px 46px);
+      transform: perspective(70vh) rotateX(64deg);
+      transform-origin: bottom center;
+      /* the far end of the floor dissolves into the horizon haze */
+      mask-image: linear-gradient(to bottom, transparent 0, #000 28%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28%);
+      animation: scroll-grid 1.7s linear infinite;
+    }
+    @keyframes scroll-grid { to { background-position: 0 0, 0 46px; } }
+
+    /* CRT scanlines + vignette, drawn over everything but never clickable */
+    .crt {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(to bottom, rgba(0,0,0,.16) 0 1px, transparent 1px 3px),
+        radial-gradient(120% 90% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%);
+    }
+
+    /* ------------------------------------------------------- win95 chrome */
+    .raised {
+      background: var(--face);
+      border: none;
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf;
+    }
+    .sunken {
+      background: var(--face);
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+
+    .window {
+      padding: 3px;
+      margin: 0 auto 18px;
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf,
+        6px 6px 0 rgba(0,0,0,.45);
+      background: var(--face);
+    }
+    .titlebar {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: 32px 20px;
+      gap: 6px;
+      padding: 3px 3px 3px 5px;
+      background: linear-gradient(90deg, var(--title-a), var(--title-b));
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: .02em;
     }
-    .wrap { width: 100%; max-width: 760px; }
-    header { text-align: center; margin-bottom: 36px; }
-    .logo { font-size: 64px; line-height: 1; }
+    .titlebar .name {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tb-btns { display: flex; gap: 2px; }
+    .tb-btn {
+      width: 18px; height: 16px;
+      display: grid;
+      place-items: center;
+      font: 700 11px/1 var(--ui);
+      color: var(--ink);
+      background: var(--face);
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf;
+    }
+    .win-body { padding: 16px 18px; }
+
+    /* ------------------------------------------------------------ marquee */
+    .marquee {
+      max-width: 860px;
+      margin: 0 auto 16px;
+      padding: 4px;
+      overflow: hidden;
+      background: #000;
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf,
+        0 0 18px rgba(5,255,161,.35);
+    }
+    .marquee p {
+      margin: 0;
+      display: inline-block;
+      white-space: nowrap;
+      padding-left: 25%;
+      font: 700 13px/1.6 var(--mono);
+      color: var(--mint);
+      text-shadow: 0 0 8px rgba(5,255,161,.8);
+      animation: slide 26s linear infinite;
+    }
+    @keyframes slide { to { transform: translateX(-100%); } }
+
+    /* --------------------------------------------------------------- hero */
+    .wrap { max-width: 860px; margin: 0 auto; }
+
+    /* The hero is its own little CRT: sunset, floor and all. */
+    .hero {
+      position: relative;
+      overflow: hidden;
+      min-height: 300px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 20px 12px;
+      background: linear-gradient(#08010f 0%, #1d0634 42%, #55105a 64%, #9c1a63 100%);
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+    .scene { position: absolute; inset: 0; overflow: hidden; }
+    .scene .sun {
+      position: absolute;
+      left: 50%;
+      bottom: 36%;
+      width: 180px;
+      height: 180px;
+      transform: translateX(-50%);
+      border-radius: 50%;
+      background: linear-gradient(#fffb96 0%, #ffb26b 36%, #ff71ce 70%, #b967ff 100%);
+      filter: drop-shadow(0 0 34px rgba(255,113,206,.8));
+    }
+    /* the classic sliced-sun stripes */
+    .scene .sun::after {
+      content: "";
+      position: absolute;
+      inset: 44% 0 0;
+      border-radius: 0 0 50% 50% / 0 0 100% 100%;
+      background: repeating-linear-gradient(to bottom,
+        transparent 0 6px, #1d0634 6px 12px);
+      mask-image: linear-gradient(to bottom, transparent, #000 25%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent, #000 25%);
+    }
+    .scene .floor {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 38%;
+      background: linear-gradient(#15042a, #05010b 70%);
+    }
+    .scene .line {
+      position: absolute;
+      left: 0; right: 0;
+      bottom: 38%;
+      height: 2px;
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan), 0 0 24px rgba(1,205,254,.7);
+    }
+    .scene .mesh {
+      position: absolute;
+      left: -70%; right: -70%;
+      bottom: 0;
+      height: 300px;
+      background-image:
+        repeating-linear-gradient(to right, rgba(1,205,254,.7) 0 2px, transparent 2px 54px),
+        repeating-linear-gradient(to bottom, rgba(255,113,206,.8) 0 2px, transparent 2px 30px);
+      transform: perspective(195px) rotateX(64deg);
+      transform-origin: bottom center;
+      mask-image: linear-gradient(to bottom, transparent 0, #000 32%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 32%);
+      animation: scroll-mesh 1.7s linear infinite;
+    }
+    @keyframes scroll-mesh { to { background-position: 0 0, 0 30px; } }
+    .hero-front { position: relative; }
+    .cow {
+      font-size: 58px;
+      line-height: 1;
+      animation: bob 3s ease-in-out infinite;
+      filter: drop-shadow(0 0 14px rgba(255,113,206,.9));
+    }
+    @keyframes bob {
+      0%, 100% { transform: translateY(0) rotate(-3deg); }
+      50%      { transform: translateY(-8px) rotate(3deg); }
+    }
     h1 {
-      font-size: clamp(2rem, 6vw, 3rem);
-      margin: 12px 0 6px;
-      letter-spacing: -0.02em;
+      margin: 8px 0 4px;
+      font-size: clamp(2.4rem, 9vw, 4.4rem);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      background: linear-gradient(#ffffff 6%, #b9c6d6 34%, #4a5a75 52%, #ffffff 62%, #ff71ce 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      -webkit-text-stroke: 1px rgba(43,11,58,.85);
+      filter: drop-shadow(2px 2px 0 var(--cyan)) drop-shadow(-2px -2px 0 var(--pink));
     }
-    .tag { color: var(--muted); font-size: 1.05rem; margin: 0; }
+    .sub {
+      margin: 14px auto 4px;
+      max-width: 60ch;
+      text-align: center;
+      font: 700 14px/1.6 var(--mono);
+      color: #3a1d55;
+    }
+    .sub code {
+      font: inherit;
+      background: var(--night);
+      color: var(--mint);
+      padding: 0 4px;
+    }
+    .blink { animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .new {
+      color: #d00;
+      font-weight: 700;
+      font-size: 12px;
+      vertical-align: super;
+    }
+
+    .rule {
+      height: 2px;
+      margin: 14px 0;
+      border: 0;
+      background: repeating-linear-gradient(90deg,
+        var(--pink) 0 10px, var(--purple) 10px 20px, var(--cyan) 20px 30px, var(--mint) 30px 40px);
+    }
+
+    /* -------------------------------------------------------------- cards */
     .cards {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 18px;
+      gap: 16px;
+      margin: 0;
     }
-    @media (max-width: 560px) { .cards { grid-template-columns: 1fr; } }
+    @media (max-width: 620px) { .cards { grid-template-columns: 1fr; } }
+
     .card {
       display: block;
       text-decoration: none;
-      color: inherit;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 26px 24px;
-      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+      color: var(--ink);
+      padding: 3px;
+      background: var(--face);
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf,
+        6px 6px 0 rgba(0,0,0,.45);
+      transition: transform .1s steps(2), box-shadow .1s steps(2);
     }
-    .card:hover {
-      transform: translateY(-3px);
-      border-color: var(--accent);
-      background: var(--panel-2);
+    .card:hover, .card:focus-visible {
+      transform: translate(-3px, -3px);
+      outline: none;
     }
-    .card .ico { font-size: 34px; }
-    .card h2 { margin: 12px 0 6px; font-size: 1.35rem; }
-    .card p { margin: 0; color: var(--muted); font-size: .95rem; }
-    .card .go { margin-top: 14px; font-weight: 600; color: var(--accent); }
-    .card.play:hover { border-color: var(--accent-2); }
-    .card.play .go { color: var(--accent-2); }
-    footer {
-      margin-top: 34px;
+    .card.play:hover, .card.play:focus-visible {
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf,
+        9px 9px 0 var(--mint);
+    }
+    .card.edit:hover, .card.edit:focus-visible {
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf,
+        9px 9px 0 var(--cyan);
+    }
+    .card .body { padding: 16px 16px 14px; }
+    .card .ico { font-size: 36px; line-height: 1; }
+    .card h2 {
+      margin: 8px 0 6px;
+      font-size: 1.3rem;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .card p { margin: 0 0 14px; font-size: 13px; color: #26262e; }
+    .btn {
+      display: inline-block;
+      padding: 5px 16px;
+      font: 700 13px/1 var(--ui);
+      background: var(--face);
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf;
+    }
+    .card:active .btn {
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+
+    /* ------------------------------------------------------------ specs */
+    .specs {
+      margin: 0;
+      padding: 10px 12px;
+      font: 13px/1.7 var(--mono);
+      color: var(--mint);
+      background: #000;
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+    .specs dt {
+      color: var(--yellow);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-size: 11px;
+      margin-top: 8px;
+    }
+    .specs dt:first-child { margin-top: 0; }
+    .specs dd { margin: 0 0 0 14px; }
+    .specs dd::before { content: "> "; color: var(--pink); }
+
+    /* ------------------------------------------------- under construction */
+    .construction {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 16px auto 18px;
+      padding: 8px 12px;
+      max-width: 860px;
+      font: 700 12px/1.4 var(--ui);
+      color: #2b0b3a;
+      background: repeating-linear-gradient(45deg,
+        #ffd400 0 14px, #1a1a1a 14px 28px);
+      box-shadow: 4px 4px 0 rgba(0,0,0,.45);
+    }
+    .construction span {
+      background: #ffd400;
+      padding: 4px 8px;
+      box-shadow: 2px 2px 0 rgba(0,0,0,.5);
+    }
+
+    /* -------------------------------------------------------------- misc */
+    .counter {
+      display: inline-flex;
+      gap: 2px;
+      vertical-align: middle;
+    }
+    .counter b {
+      background: #000;
+      color: var(--mint);
+      font: 700 15px/1 var(--mono);
+      padding: 4px 5px;
+      border: 1px solid #444;
+      text-shadow: 0 0 6px rgba(5,255,161,.9);
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin: 12px 0 4px;
+    }
+    .badge {
+      width: 88px;
+      height: 31px;
+      display: grid;
+      place-items: center;
       text-align: center;
-      color: var(--muted);
-      font-size: .85rem;
+      font: 700 8px/1.15 var(--ui);
+      text-transform: uppercase;
+      letter-spacing: .02em;
+      text-decoration: none;
+      border: 1px solid #000;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.35);
     }
-    footer a { color: var(--accent); text-decoration: none; }
-    footer a:hover { text-decoration: underline; }
+    .badge.b1 { background: linear-gradient(#000080, #1084d0); color: var(--yellow); }
+    .badge.b2 { background: linear-gradient(#2b0b3a, #b967ff); color: var(--mint); }
+    .badge.b3 { background: linear-gradient(#05ffa1, #01cdfe); color: #06203a; }
+    .badge.b4 { background: linear-gradient(#ff71ce, #fffb96); color: #4a0b2e; }
+
+    footer {
+      max-width: 860px;
+      margin: 0 auto;
+      text-align: center;
+      font-size: 12px;
+      color: #f3d9ff;
+      text-shadow: 1px 1px 0 rgba(0,0,0,.6);
+    }
+    footer a { color: var(--yellow); }
+    footer a:hover { color: var(--mint); }
+    footer .links { margin: 10px 0 4px; font-family: var(--mono); }
+    footer .links a { text-decoration: none; }
+    footer .links a:hover { text-decoration: underline; }
+    footer .tiny { color: #d0b6e8; font-size: 11px; }
+
+    /* ------------------------------------------------------------ taskbar */
+    .taskbar {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      z-index: 900;
+      height: var(--taskbar-h);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px;
+      background: var(--face);
+      box-shadow: inset 0 1px 0 var(--light), inset 0 2px 0 #dfdfdf;
+    }
+    #start {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px 4px 6px;
+      font: 700 13px/1 var(--ui);
+      color: var(--ink);
+      cursor: pointer;
+      background: var(--face);
+      border: 0;
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf;
+    }
+    #start[aria-expanded="true"] {
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+    .tray {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      font: 12px/1 var(--ui);
+      box-shadow:
+        inset  1px  1px 0 var(--shadow),
+        inset -1px -1px 0 var(--light);
+    }
+
+    #startmenu {
+      position: fixed;
+      left: 6px;
+      bottom: var(--taskbar-h);
+      z-index: 950;
+      display: none;
+      padding: 3px;
+      background: var(--face);
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf,
+        4px -4px 0 rgba(0,0,0,.45);
+    }
+    #startmenu.open { display: flex; }
+    #startmenu .spine {
+      width: 26px;
+      background: linear-gradient(#1084d0, #000080);
+      color: #fff;
+      font: 700 13px/1 var(--ui);
+      letter-spacing: .12em;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      display: grid;
+      place-items: center;
+      padding: 12px 0;
+    }
+    #startmenu ul {
+      list-style: none;
+      margin: 0;
+      padding: 2px 0;
+      min-width: 190px;
+    }
+    #startmenu a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 22px 7px 10px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    #startmenu a:hover, #startmenu a:focus-visible {
+      background: var(--title-a);
+      color: #fff;
+      outline: none;
+    }
+
+    .sparkle {
+      position: fixed;
+      z-index: 998;
+      pointer-events: none;
+      font-size: 13px;
+      animation: fade-out .7s linear forwards;
+    }
+    @keyframes fade-out {
+      to { opacity: 0; transform: translate(-50%, -22px) scale(.4) rotate(90deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      .marquee p { padding-left: 0; }
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div class="logo">🐄</div>
-      <h1>CowEngine</h1>
-      <p class="tag">A C++ game engine — <code>.cow</code> scripting, Bullet physics, and multiplayer in the browser.</p>
-    </header>
+  <div class="sky" aria-hidden="true"></div>
+  <div class="ground" aria-hidden="true"></div>
+  <div class="grid" aria-hidden="true"></div>
+  <div class="horizon" aria-hidden="true"></div>
+  <div class="crt" aria-hidden="true"></div>
 
-    <main class="cards">
-      <a class="card play" href="play/">
-        <div class="ico">🎮</div>
-        <h2>Play</h2>
-        <p>Jump into the shared world. Move, look around, and shoot cows alongside other players in real time.</p>
-        <div class="go">Play now →</div>
-      </a>
-      <a class="card edit" href="edit/">
-        <div class="ico">🛠️</div>
-        <h2>Editor</h2>
-        <p>Build and script scenes in the browser-based editor, then export a standalone game.</p>
-        <div class="go">Open editor →</div>
-      </a>
-    </main>
+  <div class="marquee" aria-hidden="true">
+    <p>★ W E L C O M E &nbsp;T O &nbsp;C O W E N G I N E ★ &nbsp; NOW WITH AUTHORITATIVE MULTIPLAYER &nbsp; ★ &nbsp; 100% HAND-WRITTEN C++17 ;) &nbsp; ★ &nbsp; NO PLUGINS REQUIRED &nbsp; ★ &nbsp; BULLET PHYSICS INSIDE &nbsp; ★ &nbsp; MOOOOO &nbsp; ★</p>
   </div>
+
+  <div class="wrap">
+    <div class="window">
+      <div class="titlebar">
+        <span aria-hidden="true">🐄</span>
+        <span class="name">C:\COWENGINE\COWENGINE.EXE</span>
+        <span class="tb-btns" aria-hidden="true">
+          <span class="tb-btn">_</span>
+          <span class="tb-btn">□</span>
+          <span class="tb-btn">✕</span>
+        </span>
+      </div>
+      <div class="win-body">
+        <header class="hero">
+          <div class="scene" aria-hidden="true">
+            <div class="sun"></div>
+            <div class="floor"></div>
+            <div class="mesh"></div>
+            <div class="line"></div>
+          </div>
+          <div class="hero-front">
+            <div class="cow" aria-hidden="true">🐄</div>
+            <h1>CowEngine</h1>
+          </div>
+        </header>
+
+        <p class="sub">
+          A C++ game engine with <code>.cow</code> scripting, Bullet physics,
+          and multiplayer that runs in your browser.
+          <span class="new blink">NEW!</span>
+        </p>
+
+        <hr class="rule" />
+
+        <main class="cards">
+          <a class="card play" href="play/">
+            <div class="titlebar">
+              <span class="name">PLAY.EXE</span>
+              <span class="tb-btns" aria-hidden="true"><span class="tb-btn">✕</span></span>
+            </div>
+            <div class="body">
+              <div class="ico" aria-hidden="true">🎮</div>
+              <h2>Play</h2>
+              <p>Jump into the shared world. Move, look around, and shoot cows alongside other players in real time.</p>
+              <span class="btn">▶ Play now</span>
+            </div>
+          </a>
+
+          <a class="card edit" href="edit/">
+            <div class="titlebar">
+              <span class="name">EDITOR.EXE</span>
+              <span class="tb-btns" aria-hidden="true"><span class="tb-btn">✕</span></span>
+            </div>
+            <div class="body">
+              <div class="ico" aria-hidden="true">🛠️</div>
+              <h2>Editor</h2>
+              <p>Build and script scenes in the browser-based editor, then export a standalone game.</p>
+              <span class="btn">🛠 Open editor</span>
+            </div>
+          </a>
+        </main>
+
+        <hr class="rule" />
+
+        <dl class="specs">
+          <dt>Scripting</dt>
+          <dd>.cow — a small embedded language bound to C++ builtins</dd>
+          <dt>Physics</dt>
+          <dd>Bullet rigid bodies as the authoritative world state</dd>
+          <dt>Netcode</dt>
+          <dd>Headless C++ server, client prediction + entity interpolation</dd>
+          <dt>Transport</dt>
+          <dd>WebTransport, with a WebSocket (wss://) fallback</dd>
+          <dt>Targets</dt>
+          <dd>Native (GLFW/OpenGL) and WebAssembly from one codebase</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="construction">
+    <span aria-hidden="true">🚧</span>
+    <span>PARTS OF THIS ENGINE ARE STILL UNDER CONSTRUCTION — PLEASE EXCUSE THE DUST</span>
+    <span aria-hidden="true">🚧</span>
+  </div>
+
+  <footer>
+    <div class="badges">
+      <span class="badge b1">Made with<br />C++17</span>
+      <span class="badge b2">Powered by<br />WebAssembly</span>
+      <span class="badge b3">Bullet<br />Physics</span>
+      <span class="badge b4">Best viewed<br />at 800×600</span>
+    </div>
+
+    <p>
+      You are visitor number
+      <span class="counter" id="hits" aria-label="visitor counter"></span>
+    </p>
+
+    <p class="links">
+      <a href="play/">[ PLAY ]</a>
+      <a href="edit/">[ EDITOR ]</a>
+    </p>
+
+    <p class="tiny">
+      CowEngine © <span id="year">2026</span> · No cows were harmed · Best experienced with the sound on
+    </p>
+  </footer>
+
+  <nav id="startmenu" aria-label="Start menu">
+    <div class="spine" aria-hidden="true">CowEngine 95</div>
+    <ul>
+      <li><a href="play/"><span aria-hidden="true">🎮</span> Play</a></li>
+      <li><a href="edit/"><span aria-hidden="true">🛠️</span> Editor</a></li>
+    </ul>
+  </nav>
+
+  <div class="taskbar">
+    <button id="start" type="button" aria-expanded="false" aria-controls="startmenu">
+      <span aria-hidden="true">🐄</span> Start
+    </button>
+    <div class="tray"><span aria-hidden="true">🔊</span> <span id="clock">--:--</span></div>
+  </div>
+
+  <script>
+    // --- visitor counter, in the finest tradition of the hit counter GIF ----
+    (function () {
+      var el = document.getElementById("hits");
+      if (!el) return;
+      var n = 13370;
+      try {
+        var seen = parseInt(localStorage.getItem("cowengine_hits") || "0", 10) || 0;
+        seen += 1;
+        localStorage.setItem("cowengine_hits", String(seen));
+        n += seen;
+      } catch (e) {
+        n += 1; // private mode / storage blocked
+      }
+      var digits = String(n).padStart(6, "0");
+      for (var i = 0; i < digits.length; i++) {
+        var b = document.createElement("b");
+        b.textContent = digits[i];
+        el.appendChild(b);
+      }
+    })();
+
+    // --- taskbar clock ------------------------------------------------------
+    (function () {
+      var clock = document.getElementById("clock");
+      function tick() {
+        clock.textContent = new Date().toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit"
+        });
+      }
+      tick();
+      setInterval(tick, 15000);
+      document.getElementById("year").textContent = new Date().getFullYear();
+    })();
+
+    // --- start menu ---------------------------------------------------------
+    (function () {
+      var btn = document.getElementById("start");
+      var menu = document.getElementById("startmenu");
+      function setOpen(open) {
+        menu.classList.toggle("open", open);
+        btn.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        setOpen(!menu.classList.contains("open"));
+      });
+      document.addEventListener("click", function (e) {
+        if (!menu.contains(e.target)) setOpen(false);
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") setOpen(false);
+      });
+    })();
+
+    // --- sparkle cursor trail (skipped on touch / reduced motion) -----------
+    (function () {
+      var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var fine = window.matchMedia("(pointer: fine)").matches;
+      if (reduce || !fine) return;
+
+      var chars = ["✦", "✧", "★", "･"];
+      var colors = ["#ff71ce", "#01cdfe", "#05ffa1", "#fffb96", "#b967ff"];
+      var last = 0;
+
+      document.addEventListener("mousemove", function (e) {
+        var now = Date.now();
+        if (now - last < 60) return;
+        last = now;
+
+        var s = document.createElement("span");
+        s.className = "sparkle";
+        s.textContent = chars[(Math.random() * chars.length) | 0];
+        s.style.color = colors[(Math.random() * colors.length) | 0];
+        s.style.left = e.clientX + "px";
+        s.style.top = e.clientY + "px";
+        s.style.transform = "translate(-50%, -50%)";
+        document.body.appendChild(s);
+        setTimeout(function () { s.remove(); }, 700);
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 #include "editor/panels/RuntimePanel.hpp"
+#include "editor/Win95Widgets.hpp"
 
 #include "core/Scene.hpp"
 #include "ecs/Components.hpp"
@@ -28,7 +29,7 @@ namespace editor
         ImGui::TextUnformatted("Mode");
         if (!ctx.testingMode)
         {
-            if (ImGui::Button("Start Testing"))
+            if (ui95::Button("Start Testing"))
             {
                 std::string savePath = "scenes/scene.json";
                 if (scene->saveToJSON(savePath))
@@ -45,13 +46,13 @@ namespace editor
         }
         else
         {
-            if (ImGui::Button("Stop Testing"))
+            if (ui95::Button("Stop Testing"))
                 ctx.testingMode = false;
         }
 
         ImGui::Separator();
         ImGui::TextUnformatted("Tools");
-        if (ImGui::Button("Spawn Empty Entity"))
+        if (ui95::Button("Spawn Empty Entity"))
         {
             ecs::Entity e = scene->createEmpty("Entity",
                                                glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 10.0f, 0.0f)));
@@ -59,18 +60,18 @@ namespace editor
             ctx.addLog("Spawned empty entity — use the Inspector's Add Component menu to attach mesh / physics / script.",
                        ImVec4(0.7f, 0.95f, 0.7f, 1.0f));
         }
-        if (ImGui::Button("Spawn Cow"))
+        if (ui95::Button("Spawn Cow"))
             addObjectToScene(ctx, "cow");
-        if (ImGui::Button("Spawn Cube"))
+        if (ui95::Button("Spawn Cube"))
             addObjectToScene(ctx, "cube");
-        if (ImGui::Button("Spawn Plane"))
+        if (ui95::Button("Spawn Plane"))
             addObjectToScene(ctx, "plane");
-        if (ImGui::Button("Spawn Eiffel Tower"))
+        if (ui95::Button("Spawn Eiffel Tower"))
             addObjectToScene(ctx, "tower");
 
         ImGui::Separator();
         ImGui::TextUnformatted("Input");
-        if (ImGui::SliderFloat("Mouse Sensitivity", &ctx.mouseSensitivity, 0.1f, 10.0f))
+        if (ui95::SliderFloat("Mouse Sensitivity", &ctx.mouseSensitivity, 0.1f, 10.0f))
         {
 #if defined(__EMSCRIPTEN__)
             std::ostringstream ss;
@@ -81,7 +82,7 @@ namespace editor
 
         ImGui::Separator();
         ImGui::TextUnformatted("Camera Speed");
-        ImGui::DragFloat("##CameraSpeed", &ctx.cameraSpeed, 0.1f);
+        ui95::DragFloat("##CameraSpeed", &ctx.cameraSpeed, 0.1f);
 
         ImGui::End();
     }

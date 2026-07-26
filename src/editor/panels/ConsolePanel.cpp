@@ -1,4 +1,5 @@
 #include "editor/panels/ConsolePanel.hpp"
+#include "editor/Win95Widgets.hpp"
 
 #include "core/Scene.hpp"
 
@@ -25,10 +26,10 @@ namespace editor
     {
         ImGui::Begin("Debug Console", &ctx.showConsole);
 
-        if (ImGui::Button("Clear"))
+        if (ui95::Button("Clear"))
             ctx.consoleLines.clear();
         ImGui::SameLine();
-        ImGui::Checkbox("Auto-scroll", &autoScroll);
+        ui95::Checkbox("Auto-scroll", &autoScroll);
 
         ImGui::Separator();
         ImGui::BeginChild("ConsoleScroll", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), false);
@@ -85,7 +86,7 @@ namespace editor
         bool reclaimFocus = false;
         ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory;
         CallbackBridge bridge{this, &consoleHistory, &historyPos};
-        if (ImGui::InputText("Command", consoleInput, sizeof(consoleInput), flags,
+        if (ui95::InputText("Command", consoleInput, sizeof(consoleInput), flags,
                              &ConsolePanel::textEditCallback, &bridge))
         {
             std::string commandLine(consoleInput);
