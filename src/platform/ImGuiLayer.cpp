@@ -294,8 +294,8 @@ ImGuiLayer::ImGuiLayer(Window *window) : impl(new Impl())
     // it stays optional, and the editor falls back to JetBrains Mono without
     // it. Sizes are whole numbers because pixel faces only look right on the
     // integer grid.
-    const char *pixel = "engine_assets/fonts/PixelifySans-Regular.ttf";
-    const char *pixelBold = "engine_assets/fonts/PixelifySans-Bold.ttf";
+    const char *pixel = "engine_assets/fonts/PixelifySans/PixelifySans-Regular.ttf";
+    const char *pixelBold = "engine_assets/fonts/PixelifySans/PixelifySans-Bold.ttf";
 
     // JetBrains Mono, the fallback. The first font added becomes the default.
     const char *reg = "engine_assets/fonts/JetBrainsMono-2.304/fonts/ttf/JetBrainsMono-Regular.ttf";
