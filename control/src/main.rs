@@ -32,6 +32,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
@@ -178,6 +179,10 @@ async fn main() {
         .route("/internal/rooms/:token", get(api::internal_room))
         // Hard cap before the JSON body is even buffered, so an oversized upload
         // costs us nothing. The validator's own limit is the finer-grained one.
+        // axum's `Json` extractor has its own hidden 2 MiB default independent of
+        // this layer, so it must be disabled or it silently wins regardless of
+        // COW_MAX_BUNDLE_BYTES.
+        .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(cfg.max_bundle_bytes * 2 + 65536))
         .layer(cors)
         .with_state(state);

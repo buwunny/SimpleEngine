@@ -41,7 +41,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 10001 cowengine \
-    && useradd --system --uid 10001 --gid 10001 --create-home cowengine
+    && useradd --system --uid 10001 --gid 10001 --create-home cowengine \
+    && mkdir -p /data && chown cowengine:cowengine /data
 COPY --from=server-build /out-server /app
 COPY --from=control-build /src/control/target/release/cowengine-control /usr/local/bin/
 WORKDIR /app
