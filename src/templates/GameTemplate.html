@@ -553,6 +553,13 @@
         function showLobby() {
             var gate = document.getElementById('gateOverlay');
             if (gate) gate.style.display = 'none';
+            // The loading overlay is opaque and sits above the lobby, and on this
+            // path the wasm runtime is never started (the chosen game reloads the
+            // page), so onRuntimeInitialized would never fire to hide it. Without
+            // this the lobby renders correctly but stays invisible behind a
+            // permanent "Loading... / Decompressing assets".
+            var loading = document.getElementById('loadingOverlay');
+            if (loading) loading.style.display = 'none';
             var lobby = document.getElementById('lobbyOverlay');
             if (lobby) lobby.style.display = 'flex';
             var nameInput = document.getElementById('lobbyName');

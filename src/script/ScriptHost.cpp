@@ -435,6 +435,25 @@ Value ScriptHost::builtinSpawn(const std::vector<Value> &args, const std::string
     if (!spawnEnabled)
         return Value::makeHandle("sink", nullptr);
     if (!sceneRef) return Value::makeNull();
+
+    // Population cap, on top of the execution budget. The budget bounds work
+    // per *call*, which a spawn loop respects while still leaving its objects
+    // behind: a script spawning a handful per tick trips no limit at all and
+    // accumulates hundreds a second, until Bullet's broadphase and this box's
+    // memory are the only things pushing back. Refusing (rather than erroring)
+    // keeps a legitimate script that occasionally hits the ceiling running.
+    if (maxSpawnedEntities > 0 && sceneRef->registry().view<ecs::Physics>().size() >=
+                                      static_cast<size_t>(maxSpawnedEntities))
+    {
+        if (!spawnCapLogged)
+        {
+            log("spawn refused: world is at its " + std::to_string(maxSpawnedEntities) +
+                "-body cap");
+            spawnCapLogged = true;
+        }
+        return Value::makeHandle("sink", nullptr);
+    }
+
     glm::vec3 pos = vec3FromArgs(args, glm::vec3(0.0f, 5.0f, 0.0f));
 
     // Optional 4th argument: uniform scale, applied here rather than by the
@@ -556,6 +575,10 @@ Value ScriptHost::builtinAttachScript(const std::vector<Value> &args)
     }
     auto compiled = std::make_shared<cowscript::Script>();
     bindBuiltins(*compiled);
+    // Same budget as a script loaded off disk: attach_script is reachable from
+    // inside an untrusted script, so it must not be a way to get an unbounded
+    // one running.
+    compiled->setLimits(scriptLimits);
     std::string err = compiled->compile(source);
     if (!err.empty())
     {

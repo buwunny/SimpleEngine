@@ -36,6 +36,8 @@ namespace ecs
                 }
                 auto script = std::make_shared<cowscript::Script>();
                 host.bindBuiltins(*script);
+                // Before compile(), so the top-level statements are bounded too.
+                script->setLimits(host.limits());
                 std::string err = script->compile(source);
                 if (!err.empty())
                 {
@@ -87,7 +89,7 @@ namespace ecs
                     if (!sc || i >= sc->scripts.size())
                         break;
                     auto &inst = sc->scripts[i];
-                    if (!inst.script)
+                    if (!inst.script || inst.disabled)
                         continue;
 
                     // A fresh instance always gets start() before its first
@@ -99,11 +101,30 @@ namespace ecs
                     path = inst.path;
                     auto script = inst.script; // outlive a destroy during the call
 
+                    // Re-look-up before writing `disabled`: the call may have
+                    // reallocated the pool, so the earlier `inst` reference
+                    // (and `sc`) can be dangling by the time we get back.
+                    auto markDisabled = [&r, e, i]()
+                    {
+                        if (!r.valid(e))
+                            return;
+                        auto *cur = r.try_get<ScriptComponent>(e);
+                        if (cur && i < cur->scripts.size())
+                            cur->scripts[i].disabled = true;
+                    };
+
                     if (needsStart)
                     {
                         std::string err = script->callEvent("start", {});
                         if (!err.empty())
                             std::cerr << "ScriptSystem: '" << path << "' on start: " << err << std::endl;
+                        if (script->lastErrorWasLimit())
+                        {
+                            std::cerr << "ScriptSystem: disabling '" << path
+                                      << "' (execution limit breached)" << std::endl;
+                            markDisabled();
+                            continue;
+                        }
                         if (startOnly)
                             continue;
                         if (!r.valid(e))
@@ -112,6 +133,12 @@ namespace ecs
                     std::string err = script->callEvent(event, args);
                     if (!err.empty())
                         std::cerr << "ScriptSystem: '" << path << "' on " << event << ": " << err << std::endl;
+                    if (script->lastErrorWasLimit())
+                    {
+                        std::cerr << "ScriptSystem: disabling '" << path
+                                  << "' (execution limit breached)" << std::endl;
+                        markDisabled();
+                    }
                 }
             }
             host.setSelf(NullEntity);

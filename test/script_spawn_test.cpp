@@ -30,6 +30,7 @@
 #include <btBulletDynamicsCommon.h>
 
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -514,8 +515,128 @@ static void testRocketJump()
     CHECK(horizontalSpeed() < 0.5f);
 }
 
+// A script that breaches an execution limit must be taken out of rotation, not
+// merely caught. Catching alone bounds the cost of one call while leaving it to
+// be paid again on all 60 ticks a second, for as long as the world is up --
+// which is the DoS the budget exists to prevent.
+static void testRunawayScriptDisabled()
+{
+    PhysicsWorld physics;
+    Scene scene;
+    scene.populateDefault();
+    scene.addRigidBodiesToWorld(physics);
+
+    ScriptHost host;
+    host.setContext(&scene, nullptr);
+    host.setScriptLimits(ScriptHost::serverLimits());
+
+    {
+        FILE *f = std::fopen("scripts/test_runaway.cow", "w");
+        CHECK(f != nullptr);
+        if (!f)
+            return;
+        std::fputs("on update(dt) { while (true) { } }\n", f);
+        std::fclose(f);
+    }
+
+    ecs::Entity e = scene.createEmpty("Runaway", glm::mat4(1.0f));
+    scene.registry().get<ecs::Identity>(e).scriptPaths = {"scripts/test_runaway.cow"};
+
+    host.setTime(0.0);
+    host.setDelta(0.0);
+    scene.loadScripts(host);
+    scene.startScripts(host);
+
+    auto instanceDisabled = [&]() {
+        auto *sc = scene.registry().try_get<ecs::ScriptComponent>(e);
+        return sc && !sc->scripts.empty() && sc->scripts[0].disabled;
+    };
+
+    CHECK(!instanceDisabled()); // nothing has run it yet
+
+    // First update: the budget stops it, and it gets marked.
+    auto t0 = std::chrono::steady_clock::now();
+    scene.updateScripts(host, 1.0f / 60.0f);
+    double firstMs = std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - t0).count();
+    CHECK(instanceDisabled());
+
+    // Subsequent updates must skip it entirely rather than re-running it into
+    // the budget. Timing is the assertion that matters: a re-run would cost
+    // about what the first call did.
+    t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 60; ++i) // a full second of ticks
+        scene.updateScripts(host, 1.0f / 60.0f);
+    double next60Ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - t0).count();
+
+    CHECK(instanceDisabled());
+    CHECK(next60Ms < firstMs); // 60 skipped ticks cheaper than one runaway call
+    printf("  runaway: first call %.2f ms, next 60 ticks %.2f ms total (disabled=%d)\n",
+           firstMs, next60Ms, (int)instanceDisabled());
+
+    std::remove("scripts/test_runaway.cow");
+}
+
+// The execution budget bounds work per call, which a *slow* spawner respects
+// completely: a few objects per tick trips no limit and still fills the world
+// in a couple of minutes. Only a population cap stops that one.
+static void testSpawnCapStopsSlowDrip()
+{
+    PhysicsWorld physics;
+    Scene scene;
+    scene.populateDefault();
+    scene.addRigidBodiesToWorld(physics);
+
+    ScriptHost host;
+    host.setContext(&scene, nullptr);
+    host.setScriptLimits(ScriptHost::serverLimits());
+    const int cap = 64;
+    host.setMaxSpawnedEntities(cap);
+
+    {
+        FILE *f = std::fopen("scripts/test_drip.cow", "w");
+        CHECK(f != nullptr);
+        if (!f)
+            return;
+        // Five per tick: nowhere near the step, depth or time budgets.
+        std::fputs("on update(dt) {\n"
+                   "    let i = 0\n"
+                   "    while (i < 5) { spawn_cube(i, 50, 0)  i = i + 1 }\n"
+                   "}\n", f);
+        std::fclose(f);
+    }
+
+    ecs::Entity e = scene.createEmpty("Drip", glm::mat4(1.0f));
+    scene.registry().get<ecs::Identity>(e).scriptPaths = {"scripts/test_drip.cow"};
+
+    host.setTime(0.0);
+    host.setDelta(0.0);
+    scene.loadScripts(host);
+    scene.startScripts(host);
+
+    for (int tick = 0; tick < 120; ++tick) // two seconds; 600 spawns attempted
+    {
+        host.setTime(tick / 60.0);
+        scene.updateScripts(host, 1.0f / 60.0f);
+    }
+
+    const size_t bodies = scene.registry().view<ecs::Physics>().size();
+    // The script itself must still be alive: refusing a spawn is not an error,
+    // so nothing should have disabled it.
+    auto *sc = scene.registry().try_get<ecs::ScriptComponent>(e);
+    CHECK(sc && !sc->scripts.empty() && !sc->scripts[0].disabled);
+    CHECK(bodies <= static_cast<size_t>(cap));
+    printf("  slow drip: 600 spawns attempted over 120 ticks -> %zu bodies (cap %d)\n",
+           bodies, cap);
+
+    std::remove("scripts/test_drip.cow");
+}
+
 int main()
 {
+    testRunawayScriptDisabled();
+    testSpawnCapStopsSlowDrip();
     testShotIsCentred();
     testBlast();
     testRocketJump();

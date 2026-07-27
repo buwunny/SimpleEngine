@@ -95,6 +95,12 @@ namespace ecs
         // miss the one startScripts() call, so updateScripts() starts any instance
         // that is still false before its first update.
         bool started = false;
+        // Set once a script breaches an execution limit, which stops it being
+        // called again. Without this a `while true` script is caught by the
+        // budget but then burns that entire budget again on every one of the 60
+        // ticks a second, for as long as the world is up -- the guard would
+        // bound the damage per call while leaving the server just as unusable.
+        bool disabled = false;
     };
 
     // Holds every compiled script attached to an entity, parallel to (but

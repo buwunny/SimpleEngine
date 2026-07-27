@@ -191,10 +191,63 @@ static EM_BOOL keyup_callback(int eventType, const EmscriptenKeyboardEvent *e, v
     return EM_TRUE;
 }
 
+// Write to the real browser clipboard. Without this the web build silently has
+// no clipboard at all: ImGui's default handler only fills its own in-memory
+// buffer, so "Copy" buttons and Ctrl+C appear to work but nothing ever lands on
+// the system clipboard. That is worse than a visibly broken button for the
+// publish edit key, which is shown exactly once and is unrecoverable if lost.
+EM_JS(void, cow_clipboard_write, (const char *text), {
+    var s = UTF8ToString(text);
+    // execCommand covers both an insecure context (navigator.clipboard is
+    // undefined off https) and browsers that reject the async API.
+    function fallback() {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = s;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.top = '-1000px';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            ta.setSelectionRange(0, ta.value.length);
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        } catch (e) { }
+    }
+    try {
+        // Async writeText needs transient user activation, which a click still
+        // carries when ImGui processes it on the next animation frame.
+        if (navigator.clipboard && navigator.clipboard.writeText)
+            navigator.clipboard.writeText(s)['catch'](fallback);
+        else
+            fallback();
+    } catch (e) {
+        fallback();
+    }
+});
+
+// ImGui's stock handler, kept so it still mirrors into the internal buffer that
+// Platform_GetClipboardTextFn reads — otherwise overriding the setter would
+// leave in-app paste returning stale text.
+static void (*s_prevSetClipboardTextFn)(ImGuiContext *, const char *) = nullptr;
+
+static void cow_set_clipboard_text(ImGuiContext *ctx, const char *text)
+{
+    if (s_prevSetClipboardTextFn)
+        s_prevSetClipboardTextFn(ctx, text);
+    if (text)
+        cow_clipboard_write(text);
+}
+
 void ImGui_ImplEmscripten_Init()
 {
     ImGuiIO &io = ImGui::GetIO();
     io.BackendPlatformName = "imgui_impl_emscripten";
+
+    ImGuiPlatformIO &platformIo = ImGui::GetPlatformIO();
+    s_prevSetClipboardTextFn = platformIo.Platform_SetClipboardTextFn;
+    platformIo.Platform_SetClipboardTextFn = cow_set_clipboard_text;
     emscripten_set_mousemove_callback("#canvas", NULL, EM_TRUE, mouse_callback);
     emscripten_set_mousedown_callback("#canvas", NULL, EM_TRUE, mousedown_callback);
     emscripten_set_mouseup_callback("#canvas", NULL, EM_TRUE, mouseup_callback);

@@ -1,6 +1,7 @@
 #include "script/CowScript.hpp"
 
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -935,6 +936,14 @@ namespace cowscript
         Value value;
     };
 
+    // A breached execution limit. Distinct from a plain runtime error so the
+    // caller can tell "this script is hostile or broken beyond recovery, stop
+    // running it" from "this script hit a bad value once".
+    struct LimitExceeded : std::runtime_error
+    {
+        using std::runtime_error::runtime_error;
+    };
+
     struct Script::Impl
     {
         std::vector<FnDecl> functions;
@@ -944,6 +953,64 @@ namespace cowscript
         PropertyGetFn propGet;
         PropertySetFn propSet;
         Env globals;
+
+        Limits limits;
+        unsigned long long steps = 0;
+        int depth = 0;
+        std::chrono::steady_clock::time_point deadline;
+        bool deadlineActive = false;
+
+        // Start a fresh budget. Every entry point from outside the interpreter
+        // (an event call, or the top-level statements at compile time) resets
+        // it, so the bound is per invocation rather than per script lifetime --
+        // a script that legitimately does a little work every tick forever must
+        // not eventually accumulate its way into a false positive.
+        void beginBudget()
+        {
+            steps = 0;
+            depth = 0;
+            deadlineActive = limits.maxMillis > 0.0;
+            if (deadlineActive)
+                deadline = std::chrono::steady_clock::now() +
+                           std::chrono::microseconds(
+                               static_cast<long long>(limits.maxMillis * 1000.0));
+        }
+
+        // Charged once per statement and per expression node evaluated.
+        void charge()
+        {
+            if (++steps > limits.maxSteps)
+                throw LimitExceeded("step budget exceeded (" +
+                                    std::to_string(limits.maxSteps) +
+                                    " steps) -- infinite loop?");
+            // steady_clock::now() costs far more than the counter increment, so
+            // sample it only every 1024 steps rather than on every one.
+            if (deadlineActive && (steps & 1023ull) == 0 &&
+                std::chrono::steady_clock::now() > deadline)
+                throw LimitExceeded("time budget exceeded (" +
+                                    std::to_string(limits.maxMillis) + " ms)");
+        }
+
+        // RAII so the depth unwinds correctly when a LimitExceeded or a
+        // ReturnException propagates out of a nested call.
+        struct DepthGuard
+        {
+            Impl *impl;
+            explicit DepthGuard(Impl *i) : impl(i)
+            {
+                if (++impl->depth > impl->limits.maxCallDepth)
+                {
+                    // Undo before throwing: a ctor that throws gets no dtor.
+                    --impl->depth;
+                    throw LimitExceeded("call depth exceeded (" +
+                                        std::to_string(impl->limits.maxCallDepth) +
+                                        ") -- runaway recursion?");
+                }
+            }
+            ~DepthGuard() { --impl->depth; }
+            DepthGuard(const DepthGuard &) = delete;
+            DepthGuard &operator=(const DepthGuard &) = delete;
+        };
 
         const FnDecl *findFunction(const std::string &name) const
         {
@@ -973,6 +1040,7 @@ namespace cowscript
 
         Value execFunction(const FnDecl &fn, const std::vector<Value> &args)
         {
+            DepthGuard guard(this);
             Env local;
             local.parent = &globals;
             for (size_t i = 0; i < fn.params.size(); ++i)
@@ -993,6 +1061,7 @@ namespace cowscript
 
         void execStmt(const Stmt &s, Env &env)
         {
+            charge();
             switch (s.kind)
             {
             case StmtKind::Let:
@@ -1040,8 +1109,12 @@ namespace cowscript
                     inner.parent = &env;
                     for (auto &b : s.body)
                         execStmt(*b, inner);
+                    // Kept alongside the global step budget: for a single tight
+                    // loop this trips first and names the actual problem. The
+                    // step budget is what catches nested loops, which this
+                    // per-loop counter cannot see (it restarts on every entry).
                     if (++safety > 1000000)
-                        throw std::runtime_error("while loop exceeded 1,000,000 iterations");
+                        throw LimitExceeded("while loop exceeded 1,000,000 iterations");
                 }
                 break;
             }
@@ -1056,6 +1129,7 @@ namespace cowscript
 
         Value evalExpr(const Expr &e, Env &env)
         {
+            charge();
             switch (e.kind)
             {
             case ExprKind::NumberLit:
@@ -1202,13 +1276,22 @@ namespace cowscript
         impl->events.clear();
         impl->topLevelStmts.clear();
         impl->globals.vars.clear();
+        lastLimit = false;
         try
         {
             Parser p(source);
             p.parseProgram(impl->functions, impl->events, impl->topLevelStmts);
-            // Execute top-level statements immediately to initialise global variables.
+            // Execute top-level statements immediately to initialise global
+            // variables. These are as untrusted as anything in an event body,
+            // so they run on the same budget.
+            impl->beginBudget();
             for (const auto &s : impl->topLevelStmts)
                 impl->execStmt(*s, impl->globals);
+        }
+        catch (const LimitExceeded &e)
+        {
+            lastLimit = true;
+            return std::string("limit exceeded at top level: ") + e.what();
         }
         catch (const std::exception &e)
         {
@@ -1242,15 +1325,37 @@ namespace cowscript
         const FnDecl *e = impl->findEvent(name);
         if (!e)
             return "";
+        lastLimit = false;
+        impl->beginBudget();
         try
         {
             impl->execFunction(*e, args);
+        }
+        catch (const LimitExceeded &ex)
+        {
+            lastLimit = true;
+            return std::string("limit exceeded: ") + ex.what();
         }
         catch (const std::exception &ex)
         {
             return std::string("runtime error: ") + ex.what();
         }
         return "";
+    }
+
+    void Script::setLimits(const Limits &l)
+    {
+        impl->limits = l;
+    }
+
+    const Limits &Script::limits() const
+    {
+        return impl->limits;
+    }
+
+    bool Script::lastErrorWasLimit() const
+    {
+        return lastLimit;
     }
 
     // ---------------------------------------------------------------------

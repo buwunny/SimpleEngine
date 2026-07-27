@@ -66,6 +66,33 @@ namespace cowscript
     using PropertyGetFn = std::function<Value(const Value &target, const std::string &prop)>;
     using PropertySetFn = std::function<void(const Value &target, const std::string &prop, const Value &value)>;
 
+    // Execution limits, enforced per event call.
+    //
+    // A published .cow runs on the shared room server, so it is untrusted code:
+    // an author who writes `while true {}` must not be able to pin a core and
+    // take the world down for everyone else in it. Three separate bounds,
+    // because each catches something the others cannot:
+    //
+    //   maxSteps     total interpreter steps. The per-loop iteration cap this
+    //                replaces could not see nested loops -- two nested `while`s
+    //                each under their own cap still multiply out to 10^12 steps.
+    //   maxCallDepth nested user function calls. Unbounded recursion overflows
+    //                the *native* stack, which is a SIGSEGV that kills the whole
+    //                room process (every player in it), not just the script.
+    //   maxMillis    wall-clock backstop for work the step counter under-counts,
+    //                e.g. a builtin that is itself slow. 0 disables it.
+    //
+    // Defaults are the permissive editor/singleplayer values: generous enough
+    // that no plausible legitimate script trips them. The server tightens them
+    // (see ScriptHost::serverLimits) because there the cost is borne by other
+    // players rather than by the author alone.
+    struct Limits
+    {
+        unsigned long long maxSteps = 5000000ull;
+        int maxCallDepth = 128;
+        double maxMillis = 0.0;
+    };
+
     class Script
     {
     public:
@@ -94,12 +121,23 @@ namespace cowscript
         // on success, or a runtime-error message describing the failure.
         std::string callEvent(const std::string &name, const std::vector<Value> &args);
 
+        // Execution limits for this script. Must be set before compile() to also
+        // bound the top-level statements, which run at compile time.
+        void setLimits(const Limits &limits);
+        const Limits &limits() const;
+
+        // True if the last callEvent()/compile() failure was a limit breach
+        // rather than an ordinary runtime error. Callers use this to disable a
+        // script permanently instead of re-running it every tick.
+        bool lastErrorWasLimit() const;
+
         const std::string &source() const { return src; }
 
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;
         std::string src;
+        bool lastLimit = false;
     };
 
     // Read a script file. Searches common candidate paths (cwd, ASSET_ROOT, parents).

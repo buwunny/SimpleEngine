@@ -65,6 +65,15 @@ bool GameServer::init(const std::string &scenePath)
 {
     host_.setContext(&scene_, nullptr); // no Window on the server
 
+    // Published scripts are untrusted code running on shared hardware, so the
+    // server runs them on a much tighter budget than the editor does. Set
+    // before init loads the scene, which is what compiles its scripts.
+    host_.setScriptLimits(ScriptHost::serverLimits());
+    // Bodies are a cumulative resource the per-call budget cannot bound: a
+    // script spawning a few per tick stays under every limit and still fills
+    // the world. 512 is far above anything the shipped scenes reach.
+    host_.setMaxSpawnedEntities(512);
+
     // Observe entity destruction so a scripted destroy (shoot_cow despawning a
     // cow) is announced to clients. Connected before any entities exist.
     scene_.registry().on_destroy<ecs::NetId>().connect<&GameServer::onNetIdDestroyed>(*this);

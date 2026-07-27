@@ -39,6 +39,44 @@ public:
     // instead of the client also producing its own copy of each one.
     void setSpawnEnabled(bool enabled) { spawnEnabled = enabled; }
 
+    // Execution limits applied to every script compiled through this host --
+    // both the ones loadScripts() reads off disk and the ones a running script
+    // pulls in with attach_script. Set before scripts are loaded.
+    void setScriptLimits(const cowscript::Limits &l) { scriptLimits = l; }
+    const cowscript::Limits &limits() const { return scriptLimits; }
+
+    // Ceiling on how many physics bodies may exist before spawn_* starts
+    // refusing. Separate from the execution budget because it bounds a
+    // *cumulative* resource rather than the work of any single call. 0 = no
+    // cap (the editor default -- a local author only hurts themselves).
+    void setMaxSpawnedEntities(int n) { maxSpawnedEntities = n; }
+
+    // Limits for a room server running published, untrusted scripts. Much
+    // tighter than the editor defaults because here a runaway script costs
+    // every other player in the world, not just its author: the server steps
+    // 60 times a second and runs every entity's `update` inside each step, so
+    // the per-call budget has to leave room for a whole scene's worth of them.
+    // Inline (pure policy data, no engine state) so the limits test can assert
+    // against the real production values without linking the whole host.
+    static cowscript::Limits serverLimits()
+    {
+        cowscript::Limits l;
+        // A 60 Hz tick is 16.6 ms for the *whole* world -- physics, networking
+        // and every entity's update() -- so one script getting a slice of that
+        // is already generous. 200k steps runs any reasonable per-frame script
+        // thousands of times over while capping a runaway one well under a
+        // frame.
+        l.maxSteps = 200000ull;
+        // Deep enough for ordinary helper-function nesting, shallow enough that
+        // recursion unwinds long before the native stack does.
+        l.maxCallDepth = 32;
+        // Wall-clock backstop: even if the step counter under-counts (a slow
+        // builtin costs one step no matter what it does), no single call gets
+        // to eat more than a quarter of the frame.
+        l.maxMillis = 4.0;
+        return l;
+    }
+
     void bindBuiltins(cowscript::Script &script);
 
     void setSelf(ecs::Entity e) { selfEntity = e; }
@@ -93,6 +131,9 @@ private:
     LogFn logger;
     KeyQueryFn globalKeyQuery;
     bool spawnEnabled = true;
+    cowscript::Limits scriptLimits;
+    int maxSpawnedEntities = 0;
+    bool spawnCapLogged = false; // log the cap once, not 60 times a second
 };
 
 #endif // SCRIPT_HOST_HPP
