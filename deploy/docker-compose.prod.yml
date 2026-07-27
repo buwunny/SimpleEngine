@@ -56,6 +56,12 @@ services:
       COW_ALLOWED_ORIGINS: "${COW_ALLOWED_ORIGINS:-https://cowengine.com}"
       COW_JOIN_KEY: "${COW_JOIN_KEY:-}"          # set for a friends-only gate
       COW_MAX_CONN_PER_IP: "${COW_MAX_CONN_PER_IP:-8}"
+      # Count that cap per real client rather than per socket peer. Every ws
+      # connection arrives from Caddy, so without this the cap is a whole-server
+      # player ceiling. Safe here and *only* here: this service's 8080 is never
+      # published, so Caddy on the private bridge is the only thing that can
+      # reach it and the header cannot be forged from outside.
+      COW_TRUST_PROXY: "1"
     volumes:
       # NOT /etc/letsencrypt: that tree is 0700 root:root, and this container runs
       # unprivileged, so it would read as "Permission denied" and quietly fall back

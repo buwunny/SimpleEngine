@@ -61,6 +61,14 @@ struct GateConfig {
     join_key: Option<String>,
     /// Max concurrent connections from one client IP (0 = unlimited).
     max_conn_per_ip: u32,
+    /// Count the per-IP cap against X-Forwarded-For rather than the socket peer.
+    ///
+    /// Only safe when nothing can reach the WS port except a trusted proxy,
+    /// because the header is otherwise attacker-chosen -- which would let a
+    /// client pick its own rate-limit bucket and make the cap meaningless.
+    /// docker-compose.prod.yml sets it: there the sidecar's 8080 is unpublished
+    /// and reachable only from Caddy on the private bridge.
+    trust_proxy: bool,
 }
 
 impl GateConfig {
@@ -76,7 +84,10 @@ impl GateConfig {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(8);
-        GateConfig { allowed_origins, join_key, max_conn_per_ip }
+        let trust_proxy = std::env::var("COW_TRUST_PROXY")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        GateConfig { allowed_origins, join_key, max_conn_per_ip, trust_proxy }
     }
 
     fn origin_allowed(&self, origin: Option<&str>) -> bool {
@@ -106,6 +117,48 @@ fn query_param<'a>(query: Option<&'a str>, name: &str) -> Option<&'a str> {
 /// True if `query` (a URL query string, or a path containing one) has `key=<want>`.
 fn query_has_key(query: Option<&str>, want: &str) -> bool {
     query_param(query, "key") == Some(want)
+}
+
+/// Which address the per-IP connection cap should be counted against.
+///
+/// Behind a reverse proxy every connection arrives from the proxy's own address,
+/// so counting the socket peer collapses a per-client cap into a global one --
+/// with the default of 8 that is an 8-player *server*, which looks like a random
+/// connection ceiling rather than a misconfiguration.
+///
+/// The RIGHTMOST X-Forwarded-For entry is the one to trust. Each proxy appends
+/// the address it accepted the connection from, so the last entry is what our
+/// proxy actually observed; anything to the left of it was supplied by the
+/// client and is forgeable. Taking the first entry -- the usual reading of this
+/// header -- would let any client set its own bucket and opt out of the cap.
+///
+/// Falls back to the socket peer whenever the header is absent, unparseable, or
+/// not trusted.
+fn client_ip_for_cap(
+    trust_proxy: bool,
+    peer: Option<SocketAddr>,
+    forwarded_for: Option<&str>,
+) -> Option<IpAddr> {
+    if trust_proxy {
+        if let Some(header) = forwarded_for {
+            if let Some(ip) = header
+                .rsplit(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .find_map(|s| s.parse::<IpAddr>().ok())
+            {
+                return Some(ip);
+            }
+        }
+    }
+    peer.map(|p| p.ip())
+}
+
+fn reject_429(msg: String) -> ErrorResponse {
+    HttpResponse::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .body(Some(msg))
+        .expect("valid 429 response")
 }
 
 /// Maps a `?room=<token>` to the UDP address of the game server hosting it.
@@ -397,38 +450,45 @@ impl Relay {
     }
 }
 
-/// Per-IP admission + WS handshake gate, then bridge. Applies the connection cap
-/// before the handshake and the Origin/key checks during it (a rejected handshake
-/// returns 403 to the browser). Generic over the stream so it serves both plain
-/// TCP (ws://) and a TLS-wrapped stream (wss://).
+/// Per-IP admission + WS handshake gate, then bridge. The cap, the Origin check
+/// and the key check all run during the handshake, so a rejection is an HTTP
+/// status the browser can report rather than a socket that opens and closes.
+/// Generic over the stream so it serves both plain TCP (ws://) and a TLS-wrapped
+/// stream (wss://).
+///
+/// Admission is charged inside the handshake rather than before it because the
+/// address it is charged against may come from a header (see
+/// `client_ip_for_cap`), which is not readable until the request line is. The
+/// TLS handshake, the expensive part, has already happened by then either way.
+/// `charged` carries the accepted address back out so it can be released.
 async fn handle_ws<S>(stream: S, relay: Arc<Relay>, peer: Option<SocketAddr>)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let ip = peer.map(|p| p.ip());
-    if let Some(ip) = ip {
-        if !relay.acquire_ip(ip).await {
-            eprintln!("ws refused {ip}: per-IP connection cap reached");
-            return;
-        }
-    }
-    bridge_ws(stream, &relay, peer).await;
+    let charged: Arc<std::sync::Mutex<Option<IpAddr>>> = Arc::new(std::sync::Mutex::new(None));
+    bridge_ws(stream, &relay, peer, charged.clone()).await;
+    let ip = *charged.lock().unwrap();
     if let Some(ip) = ip {
         relay.release_ip(ip).await;
     }
 }
 
-async fn bridge_ws<S>(stream: S, relay: &Arc<Relay>, peer: Option<SocketAddr>)
-where
+async fn bridge_ws<S>(
+    stream: S,
+    relay: &Arc<Relay>,
+    peer: Option<SocketAddr>,
+    charged: Arc<std::sync::Mutex<Option<IpAddr>>>,
+) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    // Check Origin + join key + room during the handshake; reject with 403
-    // otherwise. The room lookup happens here (rather than after the upgrade) so
-    // a bad room token fails as a plain HTTP error the browser can report,
-    // instead of an immediately-closed WebSocket.
+    // Check Origin + join key + per-IP cap + room during the handshake; reject
+    // with 403/429 otherwise. The room lookup happens here (rather than after
+    // the upgrade) so a bad room token fails as a plain HTTP error the browser
+    // can report, instead of an immediately-closed WebSocket.
     let gate = relay.clone();
     let resolved: Arc<std::sync::Mutex<Option<SocketAddr>>> = Arc::new(std::sync::Mutex::new(None));
     let resolved_cb = resolved.clone();
+    let charged_cb = charged.clone();
     let ws = match tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, resp: Response| {
         let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
         if !gate.cfg.origin_allowed(origin) {
@@ -436,6 +496,24 @@ where
         }
         if !gate.cfg.key_ok(req.uri().query()) {
             return Err(reject_403("missing or invalid join key".into()));
+        }
+        // Charged before the room lookup, which costs an HTTP round trip to the
+        // control plane -- the cap should be what stops a flood, not the thing
+        // it gets to run first.
+        let forwarded = req
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok());
+        if let Some(ip) = client_ip_for_cap(gate.cfg.trust_proxy, peer, forwarded) {
+            let admitted =
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(gate.acquire_ip(ip))
+                });
+            if !admitted {
+                eprintln!("ws refused {ip}: per-IP connection cap reached");
+                return Err(reject_429("too many connections from your address".into()));
+            }
+            *charged_cb.lock().unwrap() = Some(ip);
         }
         let room = query_param(req.uri().query(), "room");
         // tungstenite's handshake callback is synchronous, but resolving a room
@@ -592,10 +670,14 @@ async fn main() {
 
     let cfg = GateConfig::from_env();
     println!(
-        "access gate: origins={}  join_key={}  max_conn_per_ip={}",
+        "access gate: origins={}  join_key={}  max_conn_per_ip={} ({})",
         if cfg.allowed_origins.is_empty() { "any".into() } else { cfg.allowed_origins.join(",") },
         if cfg.join_key.is_some() { "required" } else { "none" },
         if cfg.max_conn_per_ip == 0 { "unlimited".into() } else { cfg.max_conn_per_ip.to_string() },
+        // Worth stating outright: counted against the wrong address this is a
+        // whole-server cap, and the symptom (a hard player ceiling) looks
+        // nothing like the cause.
+        if cfg.trust_proxy { "per X-Forwarded-For" } else { "per socket peer" },
     );
     println!(
         "routing: {}  upstream_timeout={}",
@@ -724,3 +806,80 @@ mod tls {
 
 #[cfg(feature = "webtransport")]
 mod webtransport;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn peer(s: &str) -> Option<SocketAddr> {
+        Some(s.parse().unwrap())
+    }
+    fn ip(s: &str) -> Option<IpAddr> {
+        Some(s.parse().unwrap())
+    }
+
+    #[test]
+    fn untrusted_ignores_the_header_entirely() {
+        // Directly exposed: the header is attacker-chosen and must not be able
+        // to move the connection into a different rate-limit bucket.
+        assert_eq!(
+            client_ip_for_cap(false, peer("203.0.113.7:1234"), Some("1.2.3.4")),
+            ip("203.0.113.7")
+        );
+    }
+
+    #[test]
+    fn trusted_uses_the_proxys_own_observation() {
+        // Caddy appends the address it accepted from, so a single entry is the
+        // real client.
+        assert_eq!(
+            client_ip_for_cap(true, peer("172.18.0.5:39924"), Some("203.0.113.7")),
+            ip("203.0.113.7")
+        );
+    }
+
+    #[test]
+    fn trusted_takes_the_rightmost_entry_not_the_first() {
+        // The regression that matters: a client sending its own X-Forwarded-For
+        // gets it *prepended*, so reading left-to-right (the usual reading of
+        // this header) would hand every attacker a bucket of their choosing.
+        // 198.51.100.9 is what Caddy saw; 1.2.3.4 is what the client claimed.
+        assert_eq!(
+            client_ip_for_cap(true, peer("172.18.0.5:39924"), Some("1.2.3.4, 198.51.100.9")),
+            ip("198.51.100.9")
+        );
+        assert_eq!(
+            client_ip_for_cap(
+                true,
+                peer("172.18.0.5:39924"),
+                Some("1.2.3.4, 5.6.7.8, 198.51.100.9")
+            ),
+            ip("198.51.100.9")
+        );
+    }
+
+    #[test]
+    fn trusted_falls_back_to_peer_when_the_header_is_unusable() {
+        for header in [None, Some(""), Some("   "), Some("not-an-ip"), Some("1.2.3.4, bogus")] {
+            let got = client_ip_for_cap(true, peer("172.18.0.5:39924"), header);
+            // "1.2.3.4, bogus" is the interesting one: the rightmost entry does
+            // not parse, so it skips left rather than giving up -- but it must
+            // never silently accept a value it could not parse.
+            let want = if header == Some("1.2.3.4, bogus") { ip("1.2.3.4") } else { ip("172.18.0.5") };
+            assert_eq!(got, want, "header={header:?}");
+        }
+    }
+
+    #[test]
+    fn handles_ipv6_and_whitespace() {
+        assert_eq!(
+            client_ip_for_cap(true, peer("172.18.0.5:39924"), Some("  2001:db8::1  ")),
+            ip("2001:db8::1")
+        );
+    }
+
+    #[test]
+    fn no_peer_and_no_header_is_uncapped() {
+        assert_eq!(client_ip_for_cap(true, None, None), None);
+    }
+}
