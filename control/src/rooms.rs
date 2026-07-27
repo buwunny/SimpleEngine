@@ -51,7 +51,11 @@ impl Default for RoomConfig {
             max_rooms: 8,
             idle_secs: DEFAULT_IDLE_SECS,
             port_cooldown: Duration::from_secs(60),
-            start_timeout: Duration::from_secs(5),
+            // 5s was too tight on a small VPS: the first spawn of a room pages
+            // the binary in cold and parses every .obj in the bundle before it
+            // binds its socket, and a bundle may legitimately carry several MB
+            // of model. Overriding is COW_ROOM_START_TIMEOUT.
+            start_timeout: Duration::from_secs(20),
         }
     }
 }
@@ -219,12 +223,20 @@ impl RoomManager {
         // Forward the child's output with a room prefix. Without this every room
         // writes into the same container log with nothing to tell them apart,
         // which this repo has already learned the hard way costs debugging cycles.
+        //
+        // The same lines are also kept in a small ring buffer so that a room
+        // which never comes up can say *why* in the error the browser sees. The
+        // previous message ("did not become ready in 5s") was true but
+        // undiagnosable: the child's own explanation had already been printed
+        // somewhere else in a shared log, if it was read at all.
+        let recent = Arc::new(Mutex::new(Vec::<String>::new()));
         for (stream, tag) in [
             (child.stdout.take().map(Either::Out), "out"),
             (child.stderr.take().map(Either::Err), "err"),
         ] {
             if let Some(stream) = stream {
                 let label = format!("room {} {}", &token[..8.min(token.len())], tag);
+                let recent = Arc::clone(&recent);
                 tokio::spawn(async move {
                     let reader: Box<dyn tokio::io::AsyncRead + Unpin + Send> = match stream {
                         Either::Out(s) => Box::new(s),
@@ -233,17 +245,27 @@ impl RoomManager {
                     let mut lines = BufReader::new(reader).lines();
                     while let Ok(Some(line)) = lines.next_line().await {
                         println!("[{label}] {line}");
+                        let mut buf = recent.lock().await;
+                        if buf.len() == 20 {
+                            buf.remove(0);
+                        }
+                        buf.push(line);
                     }
                 });
             }
         }
 
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        match self.await_ready(addr).await {
+        match self.await_ready(addr, &mut child).await {
             Ok(()) => {}
             Err(e) => {
                 let _ = child.kill().await;
-                return Err(e);
+                let tail = recent.lock().await.join(" | ");
+                return Err(if tail.is_empty() {
+                    format!("{e} (the room produced no output at all)")
+                } else {
+                    format!("{e}; room said: {tail}")
+                });
             }
         }
 
@@ -264,14 +286,29 @@ impl RoomManager {
     }
 
     /// Poll the status frame until the room answers, or give up.
-    async fn await_ready(&self, addr: SocketAddr) -> Result<(), String> {
+    ///
+    /// Also watches for the child exiting. A room that dies on startup (a bad
+    /// scene, a missing model, an OOM kill) would otherwise keep the joining
+    /// player waiting out the whole timeout only to be told the room was slow,
+    /// which points at exactly the wrong thing.
+    async fn await_ready(&self, addr: SocketAddr, child: &mut Child) -> Result<(), String> {
         let deadline = Instant::now() + self.cfg.start_timeout;
         while Instant::now() < deadline {
             if self.status(addr, Duration::from_millis(150)).await.is_some() {
                 return Ok(());
             }
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return Err(format!("the room process exited during startup ({status})"))
+                }
+                Ok(None) => {}
+                Err(e) => return Err(format!("could not check on the room process: {e}")),
+            }
         }
-        Err(format!("room at {addr} did not become ready in {:?}", self.cfg.start_timeout))
+        Err(format!(
+            "room at {addr} did not become ready in {:?}",
+            self.cfg.start_timeout
+        ))
     }
 
     /// One status round-trip: returns (sessions, players, uptime).

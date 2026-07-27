@@ -16,6 +16,7 @@
 //   COW_ROOM_PORT_MIN/MAX room port pool              (4500 / 4599)
 //   COW_MAX_ROOMS         concurrent world cap        (8)
 //   COW_ROOM_IDLE_SECS    stop a room empty this long (300)
+//   COW_ROOM_START_TIMEOUT how long a join waits for a new room (20s)
 //   COW_PUBLIC_WS / _WT   URLs handed to the browser on join
 //   COW_PUBLIC_CERTHASH   self-signed WT cert hash, dev only
 //   COW_ALLOWED_ORIGINS   CORS allow-list, comma separated (empty = any)
@@ -89,6 +90,7 @@ async fn main() {
         port_max: env_num("COW_ROOM_PORT_MAX", 4599u16),
         max_rooms: env_num("COW_MAX_ROOMS", 8usize),
         idle_secs: env_num("COW_ROOM_IDLE_SECS", rooms::DEFAULT_IDLE_SECS),
+        start_timeout: std::time::Duration::from_secs(env_num("COW_ROOM_START_TIMEOUT", 20u64)),
         ..RoomConfig::default()
     };
     if room_cfg.port_min > room_cfg.port_max {
