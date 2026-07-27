@@ -192,6 +192,12 @@ jobs:
             docker compose -f docker-compose.prod.yml restart sidecar
           fi
 
+          # caddy's image tag never changes and the Caddyfile is a bind mount, so
+          # `up -d` never sees it as a config diff — a Caddyfile edit shipped by
+          # this workflow would otherwise sit on disk unapplied until someone
+          # manually restarts the container. Cheap, so just always do it.
+          docker compose -f docker-compose.prod.yml restart caddy
+
           docker compose -f docker-compose.prod.yml ps
 
           # Keep a week of previous images for rollback; reclaim the rest so a
