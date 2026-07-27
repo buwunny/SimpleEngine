@@ -16,10 +16,15 @@
 //      WS listener to wss:// — needed to connect from an https origin.
 // Access gate (both transports): COW_ALLOWED_ORIGINS (comma list, empty=any),
 //      COW_JOIN_KEY (require ?key=<val>; empty=off), COW_MAX_CONN_PER_IP (default 8).
-// Rooms: COW_ROOMS ("<token>=<host:port>,..."), which makes `?room=<token>` select
-//      the upstream. Unset = single-upstream mode against COW_SERVER, exactly as
-//      before. COW_UPSTREAM_TIMEOUT (default 3s, 0=off) drops a session whose room
-//      has gone quiet.
+// Rooms, most specific wins:
+//      COW_CONTROL_URL (e.g. http://control:8080) resolves `?room=<token>` against
+//        the control plane, with game servers reached at COW_ROOM_HOST (a host
+//        or IP, resolved once at startup; default 127.0.0.1). This is production.
+//      COW_ROOMS ("<token>=<host:port>,...") is a static table, used by tests.
+//      Neither set = single-upstream mode against COW_SERVER, exactly as before.
+//      COW_UPSTREAM_TIMEOUT (default 3s, 0=off) drops a session whose room has
+//        gone quiet — necessary because the relay socket is unconnected and so
+//        never sees ICMP port-unreachable from a room that exited.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -106,20 +111,52 @@ fn query_has_key(query: Option<&str>, want: &str) -> bool {
 /// Maps a `?room=<token>` to the UDP address of the game server hosting it.
 ///
 /// `Single` is the pre-rooms behaviour and stays the default: one upstream for
-/// every connection, `?room=` ignored. `Table` is a static token->address map for
-/// local multi-room testing. M1 adds a `Control` variant that asks the control
-/// plane over HTTP, which is what production will use — the room table is dynamic
-/// there because rooms are spawned and reaped on demand.
+/// every connection, `?room=` ignored. `Table` is a static token->address map,
+/// used by the local multi-room tests. `Control` is production: rooms are spawned
+/// and reaped on demand, so the mapping is only knowable by asking the control
+/// plane at connect time.
 enum RoomResolver {
     Single(SocketAddr),
     Table(HashMap<String, SocketAddr>),
+    /// `host` is the control plane's address on the Docker network. Resolve it
+    /// once at startup so the handshake path stays DNS-free.
+    Control { base: String, host: IpAddr, http: reqwest::Client },
+}
+
+#[derive(serde::Deserialize)]
+struct RoomLookup {
+    port: u16,
 }
 
 impl RoomResolver {
-    fn resolve(&self, room: Option<&str>) -> Option<SocketAddr> {
+    async fn resolve(&self, room: Option<&str>) -> Option<SocketAddr> {
         match self {
             RoomResolver::Single(addr) => Some(*addr),
             RoomResolver::Table(map) => map.get(room?).copied(),
+            RoomResolver::Control { base, host, http } => {
+                let token = room?;
+                // Tokens are hex from the control plane; refuse anything else
+                // rather than pasting it into a URL.
+                if token.is_empty()
+                    || token.len() > 64
+                    || !token.chars().all(|c| c.is_ascii_alphanumeric())
+                {
+                    return None;
+                }
+                let url = format!("{base}/internal/rooms/{token}");
+                let resp = match http.get(&url).send().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("room lookup {token} failed: {e}");
+                        return None;
+                    }
+                };
+                if !resp.status().is_success() {
+                    return None;
+                }
+                let lookup: RoomLookup = resp.json().await.ok()?;
+                Some(SocketAddr::new(*host, lookup.port))
+            }
         }
     }
 
@@ -130,6 +167,9 @@ impl RoomResolver {
                 let mut names: Vec<&str> = map.keys().map(|s| s.as_str()).collect();
                 names.sort_unstable();
                 format!("{} rooms [{}]", map.len(), names.join(","))
+            }
+            RoomResolver::Control { base, host, .. } => {
+                format!("rooms via {base} (game servers at {host})")
             }
         }
     }
@@ -389,7 +429,16 @@ where
             return Err(reject_403("missing or invalid join key".into()));
         }
         let room = query_param(req.uri().query(), "room");
-        match gate.rooms.resolve(room) {
+        // tungstenite's handshake callback is synchronous, but resolving a room
+        // can mean an HTTP call to the control plane. block_in_place hands this
+        // worker's other tasks to a sibling thread for the duration, which is
+        // exactly the case it exists for; the alternative — deferring the lookup
+        // until after the upgrade — would turn a clean 403 into a WebSocket that
+        // opens and then immediately closes, which is far worse to debug.
+        let addr = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(gate.rooms.resolve(room))
+        });
+        match addr {
             Some(addr) => *resolved_cb.lock().unwrap() = Some(addr),
             None => return Err(reject_403(format!("unknown room: {room:?}"))),
         }
@@ -498,15 +547,30 @@ async fn resolve_host_port(spec: &str) -> SocketAddr {
 
 #[tokio::main]
 async fn main() {
-    // COW_ROOMS, when set, replaces the single COW_SERVER upstream with a
-    // `?room=`-keyed table. COW_SERVER is not even resolved in that mode, so a
-    // rooms deployment does not need a default game server to exist.
+    // Routing mode, most specific first. COW_SERVER is not even resolved unless
+    // we fall through to single-upstream mode, so a rooms deployment does not
+    // need a default game server to exist at all.
+    let control_url = env_or("COW_CONTROL_URL", "");
     let rooms_spec = env_or("COW_ROOMS", "");
-    let rooms = if rooms_spec.trim().is_empty() {
+    let rooms = if !control_url.trim().is_empty() {
+        let host: IpAddr = resolve_host_port(&env_or("COW_ROOM_HOST", "127.0.0.1:0"))
+            .await
+            .ip();
+        let http = reqwest::Client::builder()
+            // A wedged control plane must not wedge the handshake path.
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .expect("could not build the room lookup client");
+        RoomResolver::Control {
+            base: control_url.trim_end_matches('/').to_string(),
+            host,
+            http,
+        }
+    } else if !rooms_spec.trim().is_empty() {
+        RoomResolver::Table(parse_rooms(&rooms_spec).await)
+    } else {
         let server_spec = env_or("COW_SERVER", "127.0.0.1:4433");
         RoomResolver::Single(resolve_host_port(&server_spec).await)
-    } else {
-        RoomResolver::Table(parse_rooms(&rooms_spec).await)
     };
 
     let upstream_timeout = match env_or("COW_UPSTREAM_TIMEOUT", "3").parse::<f64>() {

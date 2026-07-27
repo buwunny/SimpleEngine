@@ -1,0 +1,22 @@
+[package]
+name = "cowengine-control"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# HTTP surface. Only the catalog/publish/join API and an internal room lookup for
+# the sidecar — no templating, no static serving (the site is on Pages).
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "process", "signal", "sync", "io-util"] }
+tower-http = { version = "0.5", features = ["cors", "limit"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# SQLite, statically linked so the runtime image needs no libsqlite3. The whole
+# workload is a handful of rows per request, so a blocking connection behind a
+# mutex is the right amount of machinery — an async pool would be pure ceremony.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+sha2 = "0.10"
+rand = "0.8"

@@ -78,10 +78,19 @@ public:
 private:
     void drawMainMenu();
     void drawDockspace();
+    // Publish-to-server modal. Drawn every frame while open so an in-flight
+    // upload can be polled — the web build has no Asyncify, so the fetch cannot
+    // be awaited and progress has to be picked up from the frame loop.
+    void drawPublishModal();
 
     editor::Context ctx;
     bool showUI = true;
     bool dockLayoutBuilt = false;
+
+    bool publishModalOpen = false;
+    bool publishModalJustOpened = false;
+    char publishTitle[80] = {};
+    char publishDescription[240] = {};
 
     std::unique_ptr<editor::WorkspacePanel> workspacePanel;
     std::unique_ptr<editor::HierarchyPanel> hierarchyPanel;

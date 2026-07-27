@@ -667,3 +667,345 @@ GameBuilder::Result GameBuilder::build(Target t, Scene *scene,
     return r;
 #endif
 }
+
+// ============================================================================
+// Publishing
+// ============================================================================
+//
+// The upload is the same {path: contents} map the exporter already stages, so
+// nothing new has to be produced on this side:
+//
+//   { "title": ..., "description": ..., "files": { "scenes/scene.json": "...",
+//     "scripts/x.cow": "...", "models/y.obj": "..." } }
+//
+// Edit keys are the only way to update a published game (publishing is
+// anonymous), so they are persisted next to the project — localStorage on the
+// web, a file in the working directory natively. Losing one means the game can
+// never be updated again, which is why the UI shows it prominently on success.
+
+namespace
+{
+    const char *kPublishKeysStore = "cowengine_publish_keys";
+
+    GameBuilder::PublishStatus g_publish;
+
+#if defined(__EMSCRIPTEN__)
+    EM_JS(char *, em_api_base, (), {
+        // Baked into the editor shell at deploy time; ?api= overrides it so a
+        // local control plane can be driven from the hosted editor.
+        var base = '';
+        try {
+            var q = new URLSearchParams(location.search);
+            base = q.get('api') || (typeof __COWENGINE_API__ === 'string' ? __COWENGINE_API__ : '');
+        } catch (e) { }
+        return stringToNewUTF8(base || '');
+    });
+
+    EM_JS(char *, em_kv_get, (const char *key), {
+        var v = '';
+        try { v = localStorage.getItem(UTF8ToString(key)) || ''; } catch (e) { }
+        return stringToNewUTF8(v);
+    });
+
+    EM_JS(void, em_kv_set, (const char *key, const char *value), {
+        try { localStorage.setItem(UTF8ToString(key), UTF8ToString(value)); } catch (e) { }
+    });
+
+    // state: 0 idle, 1 pending, 2 complete (check status), 3 transport failure
+    EM_JS(void, em_publish_start, (const char *url, const char *method,
+                                   const char *editKey, const char *body), {
+        window.__cowPublish = { state: 1, status: 0, text: '' };
+        var headers = { 'Content-Type': 'application/json' };
+        var key = UTF8ToString(editKey);
+        if (key) headers['X-Cow-Edit-Key'] = key;
+        fetch(UTF8ToString(url), {
+            method: UTF8ToString(method),
+            headers: headers,
+            body: UTF8ToString(body),
+        }).then(function (r) {
+            window.__cowPublish.status = r.status;
+            return r.text();
+        }).then(function (t) {
+            window.__cowPublish.text = t;
+            window.__cowPublish.state = 2;
+        }).catch(function (e) {
+            window.__cowPublish.text = String(e);
+            window.__cowPublish.state = 3;
+        });
+    });
+
+    EM_JS(int, em_publish_state, (), {
+        return window.__cowPublish ? window.__cowPublish.state : 0;
+    });
+    EM_JS(int, em_publish_status, (), {
+        return window.__cowPublish ? window.__cowPublish.status : 0;
+    });
+    EM_JS(char *, em_publish_text, (), {
+        return stringToNewUTF8(window.__cowPublish ? (window.__cowPublish.text || '') : '');
+    });
+
+    std::string takeJsString(char *p)
+    {
+        if (!p)
+            return {};
+        std::string s(p);
+        free(p);
+        return s;
+    }
+#endif
+
+    // Persisted publish state: { "last": "<gameId>", "keys": { "<gameId>": "<key>" } }
+    nlohmann::json loadPublishStore()
+    {
+        std::string raw;
+#if defined(__EMSCRIPTEN__)
+        raw = takeJsString(em_kv_get(kPublishKeysStore));
+#else
+        std::ifstream f(std::string(kPublishKeysStore) + ".json");
+        if (f)
+        {
+            std::ostringstream ss;
+            ss << f.rdbuf();
+            raw = ss.str();
+        }
+#endif
+        if (raw.empty())
+            return nlohmann::json::object();
+        nlohmann::json j = nlohmann::json::parse(raw, nullptr, false);
+        return j.is_object() ? j : nlohmann::json::object();
+    }
+
+    void savePublishStore(const nlohmann::json &j)
+    {
+        const std::string raw = j.dump();
+#if defined(__EMSCRIPTEN__)
+        em_kv_set(kPublishKeysStore, raw.c_str());
+#else
+        std::ofstream f(std::string(kPublishKeysStore) + ".json", std::ios::trunc);
+        if (f)
+            f << raw;
+#endif
+    }
+
+    std::string editKeyFor(const std::string &gameId)
+    {
+        if (gameId.empty())
+            return {};
+        nlohmann::json store = loadPublishStore();
+        if (!store.contains("keys") || !store["keys"].is_object())
+            return {};
+        auto it = store["keys"].find(gameId);
+        return (it != store["keys"].end() && it->is_string()) ? it->get<std::string>()
+                                                              : std::string();
+    }
+
+    void rememberPublish(const std::string &gameId, const std::string &editKey)
+    {
+        nlohmann::json store = loadPublishStore();
+        if (!store.contains("keys") || !store["keys"].is_object())
+            store["keys"] = nlohmann::json::object();
+        if (!editKey.empty())
+            store["keys"][gameId] = editKey;
+        store["last"] = gameId;
+        savePublishStore(store);
+    }
+
+    // Interpret a completed HTTP exchange. Shared by the web and native paths so
+    // the success and failure wording cannot drift between them.
+    void applyPublishResult(long status, const std::string &payload)
+    {
+        nlohmann::json j = nlohmann::json::parse(payload, nullptr, false);
+
+        if (status < 200 || status >= 300)
+        {
+            std::string msg = "Publish failed (HTTP " + std::to_string(status) + ")";
+            if (j.is_object() && j.contains("error") && j["error"].is_string())
+                msg += ": " + j["error"].get<std::string>();
+            else if (!payload.empty())
+                msg += ": " + payload.substr(0, 200);
+            g_publish.state = GameBuilder::PublishState::Failed;
+            g_publish.message = msg;
+            return;
+        }
+        if (!j.is_object() || !j.contains("id"))
+        {
+            g_publish.state = GameBuilder::PublishState::Failed;
+            g_publish.message = "Publish succeeded but the reply was not understood: " +
+                                payload.substr(0, 200);
+            return;
+        }
+
+        g_publish.state = GameBuilder::PublishState::Success;
+        g_publish.gameId = j["id"].get<std::string>();
+        g_publish.version = j.value("version", 0);
+        g_publish.editKey = j.value("edit_key", std::string());
+        rememberPublish(g_publish.gameId, g_publish.editKey);
+        g_publish.message = "Published " + g_publish.gameId + " (version " +
+                            std::to_string(g_publish.version) + ")";
+    }
+} // namespace
+
+std::string GameBuilder::apiBase()
+{
+#if defined(__EMSCRIPTEN__)
+    std::string base = takeJsString(em_api_base());
+#else
+    const char *env = std::getenv("COWENGINE_API");
+    std::string base = env ? env : "";
+#endif
+    while (!base.empty() && base.back() == '/')
+        base.pop_back();
+    return base;
+}
+
+bool GameBuilder::publishAvailable()
+{
+    return !apiBase().empty();
+}
+
+std::string GameBuilder::lastPublishedId()
+{
+    nlohmann::json store = loadPublishStore();
+    auto it = store.find("last");
+    return (it != store.end() && it->is_string()) ? it->get<std::string>() : std::string();
+}
+
+std::string GameBuilder::buildBundleJson(Scene *scene, const std::string &title,
+                                         const std::string &description)
+{
+    nlohmann::json files = nlohmann::json::object();
+
+    // The live scene, via the same save path the exporter uses, so what gets
+    // published is byte-identical to what a local export would contain. That
+    // matters beyond tidiness: the client seeds its world from this same bundle,
+    // and NetIds are derived from scene load order, so any divergence between
+    // what the server loads and what the client loads breaks collision.
+    std::vector<StagedFile> staged;
+    stageSceneSnapshot(scene, staged);
+    for (const StagedFile &sf : staged)
+        files[sf.path] = std::string(sf.bytes.begin(), sf.bytes.end());
+
+    for (const auto &dir : {std::pair<const char *, const char *>{"scripts", ".cow"},
+                            std::pair<const char *, const char *>{"models", ".obj"}})
+    {
+        std::vector<StagedFile> more;
+        std::string json;
+        stageDirectoryAndJson(dir.first, dir.second, more, json);
+        for (const StagedFile &sf : more)
+            files[sf.path] = std::string(sf.bytes.begin(), sf.bytes.end());
+    }
+
+    nlohmann::json envelope;
+    envelope["title"] = title;
+    envelope["description"] = description;
+    envelope["files"] = std::move(files);
+    return envelope.dump();
+}
+
+bool GameBuilder::publishStart(Scene *scene, const std::string &title,
+                               const std::string &description,
+                               const std::function<void(const std::string &)> &log)
+{
+    auto note = [&](const std::string &s) { if (log) log(s); };
+
+    if (g_publish.state == PublishState::Pending)
+    {
+        note("A publish is already in progress.");
+        return false;
+    }
+    const std::string base = apiBase();
+    if (base.empty())
+    {
+        g_publish = PublishStatus{PublishState::Failed,
+                                  "Publishing is not configured (no server URL).", {}, {}, 0};
+        return false;
+    }
+    if (!scene)
+    {
+        g_publish = PublishStatus{PublishState::Failed, "No active scene to publish.", {}, {}, 0};
+        return false;
+    }
+
+    // Update the existing game when we still hold its key; otherwise create one.
+    const std::string previous = lastPublishedId();
+    const std::string key = editKeyFor(previous);
+    const bool update = !previous.empty() && !key.empty();
+    const std::string url = update ? base + "/api/games/" + previous : base + "/api/games";
+    const char *method = update ? "PUT" : "POST";
+
+    note(update ? "Updating " + previous + "..." : "Publishing a new game...");
+    const std::string body = buildBundleJson(scene, title, description);
+    note("Bundle is " + std::to_string(body.size() / 1024) + " KiB.");
+
+    g_publish = PublishStatus{PublishState::Pending, "Uploading...", update ? previous : "", {}, 0};
+
+#if defined(__EMSCRIPTEN__)
+    em_publish_start(url.c_str(), method, key.c_str(), body.c_str());
+    return true;
+#else
+    // Native path shells out to curl. The editor is a developer tool here and a
+    // publish is a deliberate, occasional action, so one stalled frame is a fair
+    // price for not linking an HTTP client into every editor build.
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path tmp = fs::temp_directory_path(ec);
+    if (ec || tmp.empty())
+        tmp = ".";
+    fs::path bodyPath = tmp / "cowengine_publish_body.json";
+    {
+        std::ofstream f(bodyPath, std::ios::binary | std::ios::trunc);
+        if (!f)
+        {
+            g_publish = PublishStatus{PublishState::Failed,
+                                      "Could not stage the upload: " + bodyPath.string(), {}, {}, 0};
+            return false;
+        }
+        f << body;
+    }
+
+    std::string cmd = "curl -sS -X " + std::string(method) +
+                      " -H 'Content-Type: application/json'";
+    if (!key.empty())
+        cmd += " -H 'X-Cow-Edit-Key: " + key + "'";
+    cmd += " -w '\\n%{http_code}' --data-binary @" + bodyPath.string() + " '" + url + "' 2>&1";
+
+    std::string out;
+    if (FILE *pipe = popen(cmd.c_str(), "r"))
+    {
+        char buf[4096];
+        while (fgets(buf, sizeof(buf), pipe))
+            out += buf;
+        pclose(pipe);
+    }
+    fs::remove(bodyPath, ec);
+
+    // The body and the trailing status code are separated by the last newline.
+    long status = 0;
+    std::string payload = out;
+    if (auto nl = out.find_last_of('\n'); nl != std::string::npos)
+    {
+        status = std::strtol(out.c_str() + nl + 1, nullptr, 10);
+        payload = out.substr(0, nl);
+    }
+    applyPublishResult(status, payload);
+    return true;
+#endif
+}
+
+GameBuilder::PublishStatus GameBuilder::publishPoll()
+{
+#if defined(__EMSCRIPTEN__)
+    if (g_publish.state == PublishState::Pending)
+    {
+        const int js = em_publish_state();
+        if (js == 2)
+            applyPublishResult(em_publish_status(), takeJsString(em_publish_text()));
+        else if (js == 3)
+        {
+            g_publish.state = PublishState::Failed;
+            g_publish.message = "Could not reach the server: " + takeJsString(em_publish_text());
+        }
+    }
+#endif
+    return g_publish;
+}

@@ -1,7 +1,7 @@
 # Production stack for a remote host (e.g. an OVHcloud VPS).
 #
 # Unlike docker-compose.yml (which BUILDS from source), this file only pulls/runs
-# prebuilt images — nothing is compiled on the VPS. Ship images with
+# prebuilt images - nothing is compiled on the VPS. Ship images with
 # `deploy/deploy.sh` and run from the deploy directory on the host:
 #
 #   docker compose -f docker-compose.prod.yml up -d
@@ -9,23 +9,50 @@
 # Settings come from a `.env` file sitting next to this one (see .env.example).
 
 services:
-  server:
-    image: "${COW_SERVER_IMAGE:-cowengine-server:latest}"
+  control:
+    image: "${COW_CONTROL_IMAGE:-cowengine-control:latest}"
     restart: unless-stopped
     networks: [cownet]
-    # No published ports: only the sidecar (same network) talks to it over UDP.
+    environment:
+      COW_CONTROL_BIND: "0.0.0.0:8080"
+      COW_CONTROL_DB: "/data/cowengine.db"
+      COW_BUNDLES_DIR: "/data/bundles"
+      COW_PUBLIC_WS: "${COW_PUBLIC_WS:-wss://game.cowengine.com/net}"
+      COW_PUBLIC_WT: "${COW_PUBLIC_WT:-https://game.cowengine.com:4443/net}"
+      COW_PUBLIC_CERTHASH: "${COW_PUBLIC_CERTHASH:-}"
+      COW_ALLOWED_ORIGINS: "${COW_ALLOWED_ORIGINS:-https://cowengine.com}"
+      COW_MAX_BUNDLE_BYTES: "${COW_MAX_BUNDLE_BYTES:-3145728}"
+      COW_MAX_BUNDLE_FILES: "${COW_MAX_BUNDLE_FILES:-200}"
+      COW_PUBLISH_OPEN: "${COW_PUBLISH_OPEN:-0}"
+    volumes:
+      - control-data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [control, sidecar]
+    networks: [cownet]
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    ports:
+      - "443:8080"        # public HTTPS -> control API + WebSocket transport
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - "${TLS_DIR:-/opt/cowengine/tls}:/tls:ro"
 
   sidecar:
     image: "${COW_SIDECAR_IMAGE:-cowengine-sidecar:latest}"
     restart: unless-stopped
-    depends_on: [server]
+    depends_on: [control]
     networks: [cownet]
     environment:
-      COW_SERVER: "server:4433"       # resolves to the server service on cownet
+      COW_CONTROL_URL: "http://control:8080"
+      COW_ROOM_HOST: "control:0"
       COW_WS: "0.0.0.0:8080"          # wss listener (behind the :443 mapping)
       COW_WT: "0.0.0.0:4443"          # WebTransport / HTTP-3
       COW_TLS_CERT: "/tls/fullchain.pem"
       COW_TLS_KEY: "/tls/privkey.pem"
+      # Access control (all optional). Lock connections to your site's origin,
+      # optionally require a shared ?key=, and cap connections per IP.
       COW_ALLOWED_ORIGINS: "${COW_ALLOWED_ORIGINS:-https://cowengine.com}"
       COW_JOIN_KEY: "${COW_JOIN_KEY:-}"          # set for a friends-only gate
       COW_MAX_CONN_PER_IP: "${COW_MAX_CONN_PER_IP:-8}"
@@ -36,9 +63,11 @@ services:
       # the container's uid (and runs as a certbot deploy hook on renewal).
       - "${TLS_DIR:-/opt/cowengine/tls}:/tls:ro"
     ports:
-      - "443:8080"        # public wss://game.<your-domain>
       - "4443:4443/udp"   # public WebTransport (HTTP/3 needs inbound UDP)
 
 networks:
   cownet:
     driver: bridge
+
+volumes:
+  control-data:

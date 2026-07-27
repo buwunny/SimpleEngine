@@ -1,6 +1,6 @@
 name: Deploy backend to VPS
 
-# Builds the headless server + transport sidecar images, pushes them to GHCR,
+# Builds the control plane + transport sidecar images, pushes them to GHCR,
 # then tells the VPS to pull and restart. Nothing is compiled on the VPS.
 #
 # Required repository SECRETS (Settings > Secrets and variables > Actions):
@@ -26,7 +26,7 @@ on:
         description: Which images to build and deploy
         type: choice
         default: both
-        options: [both, server, sidecar]
+        options: [both, control, sidecar]
 
 permissions:
   contents: read
@@ -44,7 +44,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      server_image: ${{ steps.meta.outputs.server_image }}
+      control_image: ${{ steps.meta.outputs.control_image }}
       sidecar_image: ${{ steps.meta.outputs.sidecar_image }}
     steps:
       - name: Checkout
@@ -56,7 +56,7 @@ jobs:
           # GHCR requires a lowercase path; org/user names may not be.
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           tag="${GITHUB_SHA::7}"
-          echo "server_image=$REGISTRY/$owner/cowengine-server:$tag"   >> "$GITHUB_OUTPUT"
+          echo "control_image=$REGISTRY/$owner/cowengine-control:$tag" >> "$GITHUB_OUTPUT"
           echo "sidecar_image=$REGISTRY/$owner/cowengine-sidecar:$tag" >> "$GITHUB_OUTPUT"
           echo "owner=$owner" >> "$GITHUB_OUTPUT"
           echo "tag=$tag"     >> "$GITHUB_OUTPUT"
@@ -71,24 +71,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The C++ image is a ~10 min cold build (vcpkg + Bullet); the layer cache
-      # makes repeat runs minutes faster when only game sources changed.
-      - name: Build and push server
+      # The control image is a larger cold build because it carries the room
+      # server binary too; the layer cache keeps repeat runs reasonable.
+      - name: Build and push control
         if: inputs.images != 'sidecar'
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: deploy/Dockerfile.server
+          file: deploy/Dockerfile.control
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ steps.meta.outputs.server_image }}
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}/cowengine-server:latest
-          cache-from: type=gha,scope=server
-          cache-to: type=gha,scope=server,mode=max
+            ${{ steps.meta.outputs.control_image }}
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}/cowengine-control:latest
+          cache-from: type=gha,scope=control
+          cache-to: type=gha,scope=control,mode=max
 
       - name: Build and push sidecar
-        if: inputs.images != 'server'
+        if: inputs.images != 'control'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -138,7 +138,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_deploy "$VPS" "mkdir -p '$DIR'"
           scp -i ~/.ssh/id_deploy \
-            deploy/docker-compose.prod.yml deploy/.env.example deploy/install-certs.sh \
+            deploy/docker-compose.prod.yml deploy/Caddyfile deploy/.env.example deploy/install-certs.sh \
             "$VPS:$DIR/"
           ssh -i ~/.ssh/id_deploy "$VPS" "chmod +x '$DIR/install-certs.sh'"
 
@@ -146,14 +146,14 @@ jobs:
         env:
           VPS: ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}
           DIR: ${{ vars.VPS_DEPLOY_DIR || '/opt/cowengine' }}
-          SERVER_IMAGE: ${{ needs.build.outputs.server_image }}
+          CONTROL_IMAGE: ${{ needs.build.outputs.control_image }}
           SIDECAR_IMAGE: ${{ needs.build.outputs.sidecar_image }}
           WANT: ${{ inputs.images || 'both' }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
         run: |
           ssh -i ~/.ssh/id_deploy "$VPS" \
-              DIR="$DIR" SERVER_IMAGE="$SERVER_IMAGE" SIDECAR_IMAGE="$SIDECAR_IMAGE" \
+              DIR="$DIR" CONTROL_IMAGE="$CONTROL_IMAGE" SIDECAR_IMAGE="$SIDECAR_IMAGE" \
               WANT="$WANT" GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" \
               'bash -seu' <<'REMOTE'
           cd "$DIR"
@@ -180,16 +180,14 @@ jobs:
               printf '%s=%s\n' "$1" "$2" >> .env
             fi
           }
-          if [ "$WANT" != sidecar ]; then pin COW_SERVER_IMAGE  "$SERVER_IMAGE"; fi
-          if [ "$WANT" != server ];  then pin COW_SIDECAR_IMAGE "$SIDECAR_IMAGE"; fi
+          if [ "$WANT" != sidecar ]; then pin COW_CONTROL_IMAGE "$CONTROL_IMAGE"; fi
+          if [ "$WANT" != control ];  then pin COW_SIDECAR_IMAGE "$SIDECAR_IMAGE"; fi
 
           docker compose -f docker-compose.prod.yml pull
           docker compose -f docker-compose.prod.yml up -d
 
-          # The sidecar resolves the server once at startup and pins the address
-          # on its UDP socket, so a recreated server that lands on a different
-          # bridge IP would leave it relaying into the void. A server restart
-          # drops every session anyway, so bouncing the sidecar is free.
+          # The control plane owns room processes now; bouncing the sidecar is
+          # enough to pick up a fresh API/control endpoint after a control swap.
           if [ "$WANT" != sidecar ]; then
             docker compose -f docker-compose.prod.yml restart sidecar
           fi

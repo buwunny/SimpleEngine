@@ -1,0 +1,22 @@
+{
+    auto_https off
+    admin off
+}
+
+:8080 {
+    tls /tls/fullchain.pem /tls/privkey.pem
+
+    encode zstd gzip
+
+    handle_path /api/* {
+        reverse_proxy control:8080
+    }
+
+    handle_path /net/* {
+        reverse_proxy sidecar:8080
+    }
+
+    handle {
+        respond "CowEngine backend" 404
+    }
+}

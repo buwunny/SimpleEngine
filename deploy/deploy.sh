@@ -5,7 +5,7 @@
 #   deploy/deploy.sh ubuntu@game.cowengine.com
 #   deploy/deploy.sh --registry ghcr.io/bunny ubuntu@vps          # via a registry
 #   deploy/deploy.sh --no-build --tag v3 ubuntu@vps               # reship a tag
-#   deploy/deploy.sh --sidecar-only ubuntu@vps                    # partial update
+#   deploy/deploy.sh --control-only ubuntu@vps                   # partial update
 #
 # Registry-less mode (the default) streams `docker save` over the SSH connection
 # you already have; no registry account, no credentials on the VPS.
@@ -16,7 +16,7 @@ REMOTE_DIR="${REMOTE_DIR:-/opt/cowengine}"
 TAG="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo latest)"
 REGISTRY=""
 BUILD=1
-WANT_SERVER=1
+WANT_CONTROL=1
 WANT_SIDECAR=1
 TARGET=""
 
@@ -29,8 +29,8 @@ while [[ $# -gt 0 ]]; do
         --tag)          TAG="${2:?--tag needs a value}"; shift 2 ;;
         --remote-dir)   REMOTE_DIR="${2:?--remote-dir needs a path}"; shift 2 ;;
         --no-build)     BUILD=0; shift ;;
-        --server-only)  WANT_SIDECAR=0; shift ;;
-        --sidecar-only|--sidecar) WANT_SERVER=0; shift ;;
+        --control-only|--server-only) WANT_SIDECAR=0; shift ;;
+        --sidecar-only|--sidecar) WANT_CONTROL=0; shift ;;
         -h|--help)      sed -n '2,12p' "${BASH_SOURCE[0]}"; exit 0 ;;
         -*)             die "unknown flag $1" ;;
         *)              TARGET="$1"; shift ;;
@@ -39,11 +39,11 @@ done
 [[ -n "$TARGET" ]] || die "usage: deploy/deploy.sh [flags] user@host"
 
 PREFIX="${REGISTRY:+$REGISTRY/}"
-SERVER_IMAGE="${PREFIX}cowengine-server:${TAG}"
+CONTROL_IMAGE="${PREFIX}cowengine-control:${TAG}"
 SIDECAR_IMAGE="${PREFIX}cowengine-sidecar:${TAG}"
 
 IMAGES=()
-(( WANT_SERVER ))  && IMAGES+=("$SERVER_IMAGE")
+(( WANT_CONTROL ))  && IMAGES+=("$CONTROL_IMAGE")
 (( WANT_SIDECAR )) && IMAGES+=("$SIDECAR_IMAGE")
 [[ ${#IMAGES[@]} -gt 0 ]] || die "nothing selected to deploy"
 
@@ -51,10 +51,10 @@ IMAGES=()
 if (( BUILD )); then
     # linux/amd64 explicitly: OVH VPS instances are x86_64, and this keeps the
     # script honest if it's ever run from an arm64 laptop.
-    (( WANT_SERVER )) && {
-        say "building $SERVER_IMAGE"
+    (( WANT_CONTROL )) && {
+        say "building $CONTROL_IMAGE"
         docker build --platform linux/amd64 \
-            -f "$REPO_ROOT/deploy/Dockerfile.server" -t "$SERVER_IMAGE" "$REPO_ROOT"
+            -f "$REPO_ROOT/deploy/Dockerfile.control" -t "$CONTROL_IMAGE" "$REPO_ROOT"
     }
     (( WANT_SIDECAR )) && {
         say "building $SIDECAR_IMAGE"
@@ -78,6 +78,7 @@ fi
 say "updating $TARGET:$REMOTE_DIR"
 ssh "$TARGET" "mkdir -p '$REMOTE_DIR'"
 scp "$REPO_ROOT/deploy/docker-compose.prod.yml" \
+    "$REPO_ROOT/deploy/Caddyfile" \
     "$REPO_ROOT/deploy/.env.example" \
     "$REPO_ROOT/deploy/install-certs.sh" \
     "$TARGET:$REMOTE_DIR/"
@@ -89,12 +90,12 @@ rc=0
 # ssh joins multiple command-line args with plain spaces before the remote
 # shell re-splits them, so an empty arg (REGISTRY, by default) just vanishes
 # instead of arriving as ''. Pre-quote with %q and pass one string instead.
-remote_args="$(printf '%q ' "$REMOTE_DIR" "$SERVER_IMAGE" "$SIDECAR_IMAGE" \
-                           "$WANT_SERVER" "$WANT_SIDECAR" "$REGISTRY")"
+remote_args="$(printf '%q ' "$REMOTE_DIR" "$CONTROL_IMAGE" "$SIDECAR_IMAGE" \
+                           "$WANT_CONTROL" "$WANT_SIDECAR" "$REGISTRY")"
 ssh "$TARGET" "bash -s -- $remote_args" <<'REMOTE' || rc=$?
 set -euo pipefail
-dir="$1"; server_image="$2"; sidecar_image="$3"
-want_server="$4"; want_sidecar="$5"; registry="$6"
+dir="$1"; control_image="$2"; sidecar_image="$3"
+want_control="$4"; want_sidecar="$5"; registry="$6"
 cd "$dir"
 
 if [[ ! -f .env ]]; then
@@ -111,17 +112,15 @@ pin() {  # pin KEY VALUE — replace or append in .env
         printf '%s=%s\n' "$1" "$2" >> .env
     fi
 }
-[[ "$want_server"  == 1 ]] && pin COW_SERVER_IMAGE  "$server_image"
+[[ "$want_control" == 1 ]] && pin COW_CONTROL_IMAGE "$control_image"
 [[ "$want_sidecar" == 1 ]] && pin COW_SIDECAR_IMAGE "$sidecar_image"
 
 [[ -n "$registry" ]] && docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 
-# The sidecar resolves the server once at startup and pins the address on its
-# UDP socket, so a recreated server that lands on a different bridge IP would
-# leave it relaying into the void. Restarting the server drops every session
-# anyway, so bouncing the sidecar alongside it costs nothing.
-if [[ "$want_server" == 1 ]]; then
+# Control owns room processes now; if it changes, bounce the sidecar so its
+# control-plane connection is rebuilt against the fresh API.
+if [[ "$want_control" == 1 ]]; then
     docker compose -f docker-compose.prod.yml restart sidecar
 fi
 

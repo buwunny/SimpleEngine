@@ -89,6 +89,10 @@
     </div>
 
     <script>
+        // Control-plane base URL, baked by Pages (or overridden with ?api= on
+        // local builds). Empty = publish stays disabled.
+        var __COWENGINE_API__ = null;
+
         // Predefine Module to avoid auto-running main; expose runtime hook and start-on-canvas-click
         var output = document.getElementById('output');
         function appendLog(msg) {

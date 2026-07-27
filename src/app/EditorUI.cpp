@@ -14,6 +14,7 @@
 #include "editor/panels/FileBrowserPanel.hpp"
 #include "editor/panels/VfxPanel.hpp"
 #include "platform/ImGuiLayer.hpp"
+#include "editor/Win95Widgets.hpp"
 
 #if !defined(COWENGINE_GAME)
 #include "app/GameBuilder.hpp"
@@ -22,6 +23,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <ImGuizmo.h>
+
+#include <cstdio>
 
 EditorUI::EditorUI()
 {
@@ -108,6 +111,7 @@ void EditorUI::render(Scene *scene, Window *window, PhysicsWorld *physics, float
 
     drawDockspace();
     drawMainMenu();
+    drawPublishModal();
 
     if (ctx.testingMode)
     {
@@ -221,6 +225,17 @@ void EditorUI::drawMainMenu()
                 if (ImGui::MenuItem(GameBuilder::targetLabel(target), nullptr, false, available))
                     runBuild(target);
             }
+
+            ImGui::Separator();
+            const bool canPublish = GameBuilder::publishAvailable();
+            if (ImGui::MenuItem("Publish to CowEngine...", nullptr, false, canPublish))
+            {
+                publishModalOpen = true;
+                publishModalJustOpened = true;
+            }
+            if (!canPublish && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("No CowEngine server configured.\n"
+                                  "Web: ?api=<url>   Native: COWENGINE_API=<url>");
             ImGui::EndMenu();
         }
 #endif
@@ -274,3 +289,110 @@ void EditorUI::drawDockspace()
     }
     ImGui::End();
 }
+
+#if !defined(COWENGINE_GAME)
+void EditorUI::drawPublishModal()
+{
+    if (!publishModalOpen)
+        return;
+
+    if (publishModalJustOpened)
+    {
+        ImGui::OpenPopup("Publish to CowEngine");
+        publishModalJustOpened = false;
+        if (publishTitle[0] == '\0')
+            std::snprintf(publishTitle, sizeof(publishTitle), "My CowEngine Game");
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Publish to CowEngine", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        publishModalOpen = false;
+        return;
+    }
+
+    // Poll every frame: on the web the upload is a fetch that completes on some
+    // later frame, so this is the only place the result can arrive.
+    const GameBuilder::PublishStatus status = GameBuilder::publishPoll();
+    const bool busy = status.state == GameBuilder::PublishState::Pending;
+    const std::string existing = GameBuilder::lastPublishedId();
+
+    if (existing.empty())
+        ImGui::TextWrapped("Upload this scene, its scripts and its models to the CowEngine "
+                           "server. It will appear in the game browser for anyone to play.");
+    else
+        ImGui::TextWrapped("This will publish a new version of \"%s\". Players already in a "
+                           "running world stay on the old version until it empties.",
+                           existing.c_str());
+
+    ImGui::Separator();
+    ImGui::BeginDisabled(busy);
+    ui95::InputText("Title", publishTitle, sizeof(publishTitle));
+    ui95::InputText("Description", publishDescription, sizeof(publishDescription));
+    ImGui::EndDisabled();
+
+    ImGui::Spacing();
+
+    switch (status.state)
+    {
+    case GameBuilder::PublishState::Pending:
+        ImGui::TextColored(ImVec4(0.7f, 0.85f, 1.0f, 1.0f), "%s", status.message.c_str());
+        break;
+    case GameBuilder::PublishState::Failed:
+        ImGui::PushTextWrapPos(440.0f);
+        ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.55f, 1.0f), "%s", status.message.c_str());
+        ImGui::PopTextWrapPos();
+        break;
+    case GameBuilder::PublishState::Success:
+    {
+        ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "%s", status.message.c_str());
+        if (!status.editKey.empty())
+        {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f),
+                               "Save this edit key — it is the only way to update or");
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f),
+                               "remove this game, and it is shown only once:");
+            // Read-only rather than plain text so it can be selected and copied;
+            // the key is unrecoverable, so making it awkward to copy would be a
+            // genuine way to lose someone's game.
+            char keyBuf[80];
+            std::snprintf(keyBuf, sizeof(keyBuf), "%s", status.editKey.c_str());
+            ImGui::SetNextItemWidth(-1.0f);
+            ImGui::InputText("##editkey", keyBuf, sizeof(keyBuf),
+                             ImGuiInputTextFlags_ReadOnly);
+            if (ui95::Button("Copy key"))
+                ImGui::SetClipboardText(status.editKey.c_str());
+            ImGui::SameLine();
+        }
+        break;
+    }
+    case GameBuilder::PublishState::Idle:
+        break;
+    }
+
+    ImGui::Separator();
+
+    ImGui::BeginDisabled(busy);
+    if (ui95::Button(existing.empty() ? "Publish" : "Publish update"))
+    {
+        GameBuilder::publishStart(
+            ctx.scene, publishTitle, publishDescription,
+            [this](const std::string &line)
+            { ctx.addLog(line, ImVec4(0.7f, 0.85f, 1.0f, 1.0f)); });
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (ui95::Button("Close"))
+    {
+        publishModalOpen = false;
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+#else
+void EditorUI::drawPublishModal() {}
+#endif

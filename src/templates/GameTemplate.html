@@ -70,6 +70,84 @@
             margin-top: 12px;
         }
 
+        #lobbyOverlay {
+            background: rgba(0, 0, 0, 0.78);
+            z-index: 35;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        #lobbyOverlay .panel {
+            width: min(920px, 100%);
+            max-height: min(88vh, 900px);
+            overflow: auto;
+            text-align: left;
+            background: linear-gradient(180deg, rgba(20, 8, 38, 0.98), rgba(8, 4, 18, 0.98));
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 18px;
+            box-shadow: 0 28px 80px rgba(0,0,0,0.5);
+            padding: 28px;
+        }
+
+        #lobbyOverlay h1 { margin: 0 0 8px; font-size: 38px; letter-spacing: 0.02em; }
+        #lobbyOverlay .sub { margin: 0 0 20px; color: #c7bdd8; max-width: 64ch; }
+        #lobbyOverlay .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        #lobbyOverlay input {
+            flex: 1 1 240px;
+            min-width: 180px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.06);
+            color: #fff;
+            font: inherit;
+        }
+
+        #lobbyOverlay button {
+            padding: 11px 16px;
+            border-radius: 10px;
+            border: 0;
+            cursor: pointer;
+            background: linear-gradient(180deg, #01cdfe, #0288c9);
+            color: #fff;
+            font-weight: 700;
+        }
+
+        #lobbyOverlay .secondary {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.14);
+        }
+
+        #lobbyOverlay .status { margin: 16px 0 10px; color: #9fd9ff; }
+        #lobbyList { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+
+        .game-card {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 160px;
+            padding: 16px;
+            border-radius: 16px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.12);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+
+        .game-card h3 { margin: 0; font-size: 20px; color: #fff; }
+        .game-card .meta { color: #e0d6ef; font-size: 13px; line-height: 1.45; }
+        .game-card .meta span { display: inline-block; margin-right: 12px; opacity: 0.95; }
+        .game-card .play-btn { align-self: flex-start; margin-top: auto; }
+
+        .game-empty {
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px dashed rgba(255,255,255,0.24);
+            color: #d6cbe6;
+            background: rgba(255,255,255,0.04);
+        }
+
         #gateOverlay {
             background: rgba(0, 0, 0, 0.92);
             z-index: 50;
@@ -268,12 +346,30 @@
                 <p id="joinError" class="error"></p>
             </div>
         </div>
+        <div id="lobbyOverlay" class="overlay">
+            <div class="panel">
+                <h1>CowEngine Play</h1>
+                <p class="sub">Browse published worlds, seed the selected bundle into localStorage, then jump into the room.</p>
+                <div class="row">
+                    <input id="lobbySearch" type="text" placeholder="Search games" autocomplete="off" autocapitalize="off" spellcheck="false">
+                    <input id="lobbyName" type="text" placeholder="Your name" maxlength="16" autocomplete="off" autocapitalize="off" spellcheck="false">
+                    <button id="lobbyRefresh" type="button" class="secondary">Refresh</button>
+                    <button id="lobbySolo" type="button" class="secondary">Play local scene</button>
+                </div>
+                <div id="lobbyStatus" class="status">Loading catalog...</div>
+                <div id="lobbyList"></div>
+            </div>
+        </div>
     </div>
 
     <script>
         // Populated at export time by GameBuilder (base64-encoded scene JSON).
         // GameBuilder replaces this line; null means use the scene baked into CowEngine.data.
         var __COWENGINE_SCENE__ = null;
+
+        // Control-plane base URL (catalog, publish, join and bundle fetches).
+        // Baked by Pages or overridden with ?api= for local testing.
+        var __COWENGINE_API__ = null;
 
         // Multiplayer server config, injected by GameBuilder (or overridden by
         // ?wt=/?ws=/?certhash= query params). null = single-player only.
@@ -283,6 +379,201 @@
         // Where the join gate remembers the player's display name between
         // sessions, so a returning player only types it once.
         var COW_NAME_KEY = 'cowengine_player_name';
+        var COW_MP_PREFIX = 'cowengine_mp_';
+        var runtimeLoaded = false;
+
+        function getQueryParams() {
+            try { return new URLSearchParams(location.search); } catch (e) { return null; }
+        }
+
+        function getApiBase() {
+            var params = getQueryParams();
+            if (params && params.get('api'))
+                return params.get('api').replace(/\/+$/, '');
+            return typeof __COWENGINE_API__ === 'string' ? __COWENGINE_API__.replace(/\/+$/, '') : '';
+        }
+
+        function readRememberedName() {
+            try { return localStorage.getItem(COW_NAME_KEY) || ''; } catch (e) { return ''; }
+        }
+
+        function writeRememberedName(name) {
+            try {
+                if (name) localStorage.setItem(COW_NAME_KEY, name);
+                else localStorage.removeItem(COW_NAME_KEY);
+            } catch (e) { }
+        }
+
+        function loadRuntime() {
+            if (runtimeLoaded)
+                return;
+            runtimeLoaded = true;
+            var script = document.createElement('script');
+            script.async = true;
+            script.src = 'CowEngine.js';
+            document.body.appendChild(script);
+        }
+
+        function lobbyKey(name) { return COW_MP_PREFIX + name; }
+
+        function seedBundle(bundle) {
+            if (!bundle || typeof bundle !== 'object')
+                throw new Error('Bad bundle payload');
+            try { localStorage.setItem(lobbyKey('save'), String(bundle.scene || '')); } catch (e) { }
+            try { localStorage.setItem(lobbyKey('scripts'), JSON.stringify(bundle.scripts || {})); } catch (e) { }
+            try { localStorage.setItem(lobbyKey('models'), JSON.stringify(bundle.models || {})); } catch (e) { }
+        }
+
+        function lobbyMessage(text, isError) {
+            var status = document.getElementById('lobbyStatus');
+            if (!status) return;
+            status.textContent = text;
+            status.style.color = isError ? '#ff9ea5' : '#9fd9ff';
+        }
+
+        function renderLobbyCards(items, query) {
+            var list = document.getElementById('lobbyList');
+            if (!list) return;
+            list.innerHTML = '';
+            var filtered = items.filter(function (game) {
+                if (!query) return true;
+                var hay = ((game.title || '') + ' ' + (game.description || '')).toLowerCase();
+                return hay.indexOf(query.toLowerCase()) !== -1;
+            });
+            if (!filtered.length) {
+                list.innerHTML = '<div class="game-empty">No published worlds match this search.</div>';
+                return;
+            }
+            filtered.forEach(function (game) {
+                var card = document.createElement('div');
+                card.className = 'game-card';
+                var title = document.createElement('h3');
+                title.textContent = game.title || game.id || 'Untitled';
+                var meta = document.createElement('div');
+                meta.className = 'meta';
+                var players = (typeof game.players_now === 'number') ? game.players_now : 0;
+                var maxPlayers = game.max_players || 16;
+                meta.innerHTML = '<span>Players: ' + players + '/' + maxPlayers + '</span>' +
+                                 '<span>Version: ' + (game.version || 0) + '</span>' +
+                                 '<div style="margin-top:8px;">' + (game.description || 'No description yet.') + '</div>';
+                var button = document.createElement('button');
+                button.className = 'play-btn';
+                button.type = 'button';
+                button.textContent = 'Play';
+                button.addEventListener('click', function () { launchLobbyGame(game); });
+                card.appendChild(title);
+                card.appendChild(meta);
+                card.appendChild(button);
+                list.appendChild(card);
+            });
+        }
+
+        async function loadLobbyCatalog() {
+            var api = getApiBase();
+            if (!api) {
+                lobbyMessage('No control plane configured. Use the baked single-player scene or open the page with ?api=<url>.', true);
+                renderLobbyCards([], '');
+                return [];
+            }
+            lobbyMessage('Loading catalog...');
+            var resp = await fetch(api + '/api/games?limit=100', { headers: { 'Accept': 'application/json' } });
+            if (!resp.ok)
+                throw new Error('Catalog fetch failed: HTTP ' + resp.status);
+            var data = await resp.json();
+            return Array.isArray(data.games) ? data.games : [];
+        }
+
+        function redirectToGame(join, name, key) {
+            var url = new URL(location.href);
+            url.searchParams.set('room', join.room);
+            if (join.ws) url.searchParams.set('ws', join.ws);
+            if (join.wt) url.searchParams.set('wt', join.wt);
+            if (join.cert_hash) url.searchParams.set('certhash', join.cert_hash);
+            if (key) url.searchParams.set('key', key);
+            if (name) url.searchParams.set('name', name);
+            location.replace(url.toString());
+        }
+
+        async function launchLobbyGame(game) {
+            var api = getApiBase();
+            var nameInput = document.getElementById('lobbyName');
+            var name = (nameInput ? nameInput.value : readRememberedName()).trim().slice(0, 16);
+            writeRememberedName(name);
+            lobbyMessage('Joining ' + (game.title || game.id || 'world') + '...');
+            try {
+                var joinResp = await fetch(api + '/api/games/' + encodeURIComponent(game.id) + '/join', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                });
+                if (!joinResp.ok) {
+                    var joinText = await joinResp.text();
+                    throw new Error(joinText || ('Join failed: HTTP ' + joinResp.status));
+                }
+                var join = await joinResp.json();
+                var bundleResp = await fetch(api + '/api/games/' + encodeURIComponent(game.id) + '/bundle', {
+                    headers: { 'Accept': 'application/json' },
+                });
+                if (!bundleResp.ok)
+                    throw new Error('Bundle fetch failed: HTTP ' + bundleResp.status);
+                seedBundle(await bundleResp.json());
+                var params = getQueryParams();
+                redirectToGame(join, name, params ? (params.get('key') || '') : '');
+            } catch (e) {
+                lobbyMessage(String(e), true);
+            }
+        }
+
+        function shouldShowLobby() {
+            var api = getApiBase();
+            if (!api)
+                return false;
+            var params = getQueryParams();
+            if (!params)
+                return true;
+            return !params.get('room') && !params.get('singleplayer') && !params.get('ws') && !params.get('wt');
+        }
+
+        function showLobby() {
+            var gate = document.getElementById('gateOverlay');
+            if (gate) gate.style.display = 'none';
+            var lobby = document.getElementById('lobbyOverlay');
+            if (lobby) lobby.style.display = 'flex';
+            var nameInput = document.getElementById('lobbyName');
+            if (nameInput) {
+                nameInput.value = readRememberedName();
+                nameInput.addEventListener('input', function () { writeRememberedName(nameInput.value.trim().slice(0, 16)); });
+            }
+            var searchInput = document.getElementById('lobbySearch');
+            var games = [];
+            function rerender() {
+                renderLobbyCards(games, searchInput ? searchInput.value : '');
+            }
+            if (searchInput)
+                searchInput.addEventListener('input', rerender);
+            var refresh = document.getElementById('lobbyRefresh');
+            if (refresh)
+                refresh.addEventListener('click', function () {
+                    lobbyMessage('Loading catalog...');
+                    loadLobbyCatalog().then(function (items) { games = items; rerender(); lobbyMessage(items.length ? 'Choose a world to play.' : 'No published worlds yet.'); })
+                        .catch(function (e) { lobbyMessage(String(e), true); });
+                });
+            var solo = document.getElementById('lobbySolo');
+            if (solo) {
+                solo.addEventListener('click', function () {
+                    var url = new URL(location.href);
+                    url.searchParams.set('singleplayer', '1');
+                    location.replace(url.toString());
+                });
+            }
+            loadLobbyCatalog().then(function (items) {
+                games = items;
+                rerender();
+                lobbyMessage(items.length ? 'Choose a world to play.' : 'No published worlds yet.');
+            }).catch(function (e) {
+                lobbyMessage(String(e), true);
+                renderLobbyCards([], '');
+            });
+        }
 
         // ---- Join gate: ask for a name + room key (shared world) or singleplayer ---
         // Only relevant when this export has a multiplayer server baked in; a
@@ -305,7 +596,7 @@
             gate.style.display = 'flex';
 
             var nameInput = document.getElementById('joinNameInput');
-            try { nameInput.value = localStorage.getItem(COW_NAME_KEY) || ''; } catch (e) { }
+            try { nameInput.value = readRememberedName(); } catch (e) { }
             nameInput.focus();
 
             function proceed(params) {
@@ -318,10 +609,7 @@
             // empty name is fine — the server assigns one.
             function rememberName() {
                 var name = nameInput.value.trim().slice(0, 16);
-                try {
-                    if (name) localStorage.setItem(COW_NAME_KEY, name);
-                    else localStorage.removeItem(COW_NAME_KEY);
-                } catch (e) { }
+                writeRememberedName(name);
                 return name;
             }
 
@@ -373,14 +661,18 @@
                 if (q && q.get('singleplayer'))
                     return {};
                 var c = Object.assign({}, __COWENGINE_SERVER__ || {});
-                var remembered = '';
-                try { remembered = localStorage.getItem(COW_NAME_KEY) || ''; } catch (e) { }
+                var remembered = readRememberedName();
                 c.name = remembered;
                 if (q) {
                     if (q.get('wt')) c.wt = q.get('wt');
                     if (q.get('ws')) c.ws = q.get('ws');
                     if (q.get('certhash')) c.certHash = q.get('certhash');
                     if (q.get('name')) c.name = q.get('name');
+                    var room = q.get('room');
+                    if (room) {
+                        if (c.wt) c.wt += (c.wt.indexOf('?') === -1 ? '?' : '&') + 'room=' + encodeURIComponent(room);
+                        if (c.ws) c.ws += (c.ws.indexOf('?') === -1 ? '?' : '&') + 'room=' + encodeURIComponent(room);
+                    }
                     var key = q.get('key');
                     if (key) {
                         if (c.wt) c.wt += (c.wt.indexOf('?') === -1 ? '?' : '&') + 'key=' + encodeURIComponent(key);
@@ -528,6 +820,11 @@
                 config: config,
             };
         })();
+
+        if (shouldShowLobby())
+            showLobby();
+        else
+            loadRuntime();
 
         function resizeCanvas() {
             var canvas = document.getElementById('canvas');
@@ -751,7 +1048,6 @@
             }
         };
     </script>
-    <script async src="CowEngine.js"></script>
 </body>
 
 </html>

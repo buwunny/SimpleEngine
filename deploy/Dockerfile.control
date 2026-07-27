@@ -1,0 +1,53 @@
+# CowEngine control plane: catalog, publishing and room orchestration.
+# Build context is the repo root:
+#   docker build -f deploy/Dockerfile.control -t cowengine-control .
+
+# ---- room server build stage ---------------------------------------------
+FROM ubuntu:24.04 AS server-build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build git curl zip unzip tar pkg-config ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV VCPKG_ROOT=/opt/vcpkg
+RUN git clone --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
+    && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+WORKDIR /src
+COPY . .
+
+RUN cmake -S . -B build/server -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SERVER=ON \
+        -DUSE_VCPKG=ON \
+        -DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON \
+        -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+        -DCMAKE_INSTALL_PREFIX=/out-server \
+    && cmake --build build/server -j \
+    && cmake --install build/server
+
+# ---- control plane build stage -------------------------------------------
+FROM rust:1-bookworm AS control-build
+RUN apt-get update && apt-get install -y --no-install-recommends perl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY control/ ./control/
+WORKDIR /src/control
+RUN cargo build --release
+
+# ---- runtime stage --------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 cowengine \
+    && useradd --system --uid 10001 --gid 10001 --create-home cowengine
+COPY --from=server-build /out-server /app
+COPY --from=control-build /src/control/target/release/cowengine-control /usr/local/bin/
+WORKDIR /app
+USER cowengine
+
+# Internal only: Caddy reverse-proxies /api/* here, and the control plane
+# spawns per-room CowEngineServer child processes from /app/CowEngineServer.
+EXPOSE 8080/tcp
+CMD ["cowengine-control"]

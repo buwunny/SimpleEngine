@@ -8,6 +8,11 @@ description = "WebTransport/WebSocket <-> UDP relay in front of the CowEngine he
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+# Room lookups against the control plane. No TLS backend on purpose: that call
+# is plain http:// on the internal docker network, and pulling a second TLS
+# stack in beside tokio-rustls would double the surface for nothing.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
 # WebTransport support is added in a second stage; kept optional so the WS
 # relay compiles fast on its own.
 wtransport = { version = "0.6", optional = true }

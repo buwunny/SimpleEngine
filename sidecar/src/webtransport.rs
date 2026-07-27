@@ -97,7 +97,7 @@ async fn handle(incoming: IncomingSession, relay: Arc<Relay>) -> Result<()> {
     // Same room lookup as the WS path — `path()` carries the query string, and
     // query_param splits on '?' and '&' so it reads either.
     let room = query_param(Some(session_request.path()), "room");
-    let upstream = match relay.rooms.resolve(room) {
+    let upstream = match relay.rooms.resolve(room).await {
         Some(addr) => addr,
         None => {
             println!("wt refused {ip}: unknown room {room:?}");
