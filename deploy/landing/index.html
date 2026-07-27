@@ -120,6 +120,7 @@
     }
 
     .window {
+      position: relative;
       padding: 3px;
       margin: 0 auto 18px;
       box-shadow:
@@ -130,6 +131,22 @@
         6px 6px 0 rgba(0,0,0,.45);
       background: var(--face);
     }
+    /* Beats the display:block on .card, which would otherwise win over the
+       UA stylesheet's [hidden] rule and leave closed windows on screen. */
+    [hidden] { display: none !important; }
+
+    /* Windows fill the viewport rather than going truly fullscreen, so the
+       taskbar stays reachable. */
+    .window.maxed {
+      position: fixed;
+      inset: 8px 8px calc(var(--taskbar-h) + 8px);
+      margin: 0;
+      max-width: none;
+      overflow: auto;
+      transform: none !important;
+      z-index: 800;
+    }
+
     .titlebar {
       display: flex;
       align-items: center;
@@ -139,7 +156,12 @@
       color: #fff;
       font-weight: 700;
       letter-spacing: .02em;
+      cursor: move;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none; /* drag the window instead of scrolling the page */
     }
+    .window.maxed > .titlebar { cursor: default; }
     .titlebar .name {
       flex: 1;
       white-space: nowrap;
@@ -151,6 +173,9 @@
       width: 18px; height: 16px;
       display: grid;
       place-items: center;
+      padding: 0;
+      border: 0;
+      cursor: pointer;
       font: 700 11px/1 var(--ui);
       color: var(--ink);
       background: var(--face);
@@ -159,6 +184,13 @@
         inset  1px  1px 0 var(--light),
         inset -2px -2px 0 var(--shadow),
         inset  2px  2px 0 #dfdfdf;
+    }
+    .tb-btn:active {
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
     }
     .win-body { padding: 16px 18px; }
 
@@ -323,7 +355,6 @@
 
     .card {
       display: block;
-      text-decoration: none;
       color: var(--ink);
       padding: 3px;
       background: var(--face);
@@ -333,13 +364,17 @@
         inset -2px -2px 0 var(--shadow),
         inset  2px  2px 0 #dfdfdf,
         6px 6px 0 rgba(0,0,0,.45);
-      transition: transform .1s steps(2), box-shadow .1s steps(2);
+      /* transform belongs to the drag handler now, so the hover response is
+         the neon shadow alone. */
+      transition: box-shadow .1s steps(2);
     }
-    .card:hover, .card:focus-visible {
-      transform: translate(-3px, -3px);
-      outline: none;
+    .card .body {
+      display: block;
+      color: inherit;
+      text-decoration: none;
     }
-    .card.play:hover, .card.play:focus-visible {
+    .card .body:focus-visible { outline: 2px solid var(--cyan); outline-offset: -4px; }
+    .card.play:hover, .card.play:focus-within {
       box-shadow:
         inset -1px -1px 0 var(--dark),
         inset  1px  1px 0 var(--light),
@@ -347,7 +382,7 @@
         inset  2px  2px 0 #dfdfdf,
         9px 9px 0 var(--mint);
     }
-    .card.edit:hover, .card.edit:focus-visible {
+    .card.edit:hover, .card.edit:focus-within {
       box-shadow:
         inset -1px -1px 0 var(--dark),
         inset  1px  1px 0 var(--light),
@@ -375,7 +410,7 @@
         inset -2px -2px 0 var(--shadow),
         inset  2px  2px 0 #dfdfdf;
     }
-    .card:active .btn {
+    .card .body:active .btn {
       box-shadow:
         inset  1px  1px 0 var(--dark),
         inset -1px -1px 0 var(--light),
@@ -518,6 +553,43 @@
         inset  2px  2px 0 var(--shadow),
         inset -2px -2px 0 #dfdfdf;
     }
+    /* One button per open window, Windows 95 style: pressed in while the
+       window is on screen, popped out while it's minimized. */
+    #tasks {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .task {
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: 150px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      padding: 5px 10px;
+      border: 0;
+      cursor: pointer;
+      text-align: left;
+      font: 700 12px/1 var(--ui);
+      color: var(--ink);
+      background: var(--face);
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+    .task.minimized {
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf;
+    }
+
     .tray {
       margin-left: auto;
       display: flex;
@@ -608,14 +680,14 @@
   </div>
 
   <div class="wrap">
-    <div class="window">
+    <div class="window" data-window data-task="COWENGINE">
       <div class="titlebar">
         <span aria-hidden="true">🐄</span>
         <span class="name">C:\COWENGINE\COWENGINE.EXE</span>
-        <span class="tb-btns" aria-hidden="true">
-          <span class="tb-btn">_</span>
-          <span class="tb-btn">□</span>
-          <span class="tb-btn">✕</span>
+        <span class="tb-btns">
+          <button class="tb-btn" type="button" data-act="minimize" aria-label="Minimize CowEngine">_</button>
+          <button class="tb-btn" type="button" data-act="maximize" aria-label="Maximize CowEngine">□</button>
+          <button class="tb-btn" type="button" data-act="close" aria-label="Close CowEngine">✕</button>
         </span>
       </div>
       <div class="win-body">
@@ -641,31 +713,37 @@
         <hr class="rule" />
 
         <main class="cards">
-          <a class="card play" href="play/">
+          <div class="card play" data-window data-task="PLAY">
             <div class="titlebar">
               <span class="name">PLAY.EXE</span>
-              <span class="tb-btns" aria-hidden="true"><span class="tb-btn">✕</span></span>
+              <span class="tb-btns">
+                <button class="tb-btn" type="button" data-act="minimize" aria-label="Minimize Play">_</button>
+                <button class="tb-btn" type="button" data-act="close" aria-label="Close Play">✕</button>
+              </span>
             </div>
-            <div class="body">
+            <a class="body" href="play/">
               <div class="ico" aria-hidden="true">🎮</div>
               <h2>Play</h2>
               <p>Jump into the shared world. Move, look around, and shoot cows alongside other players in real time.</p>
               <span class="btn">▶ Play now</span>
-            </div>
-          </a>
+            </a>
+          </div>
 
-          <a class="card edit" href="edit/">
+          <div class="card edit" data-window data-task="EDITOR">
             <div class="titlebar">
               <span class="name">EDITOR.EXE</span>
-              <span class="tb-btns" aria-hidden="true"><span class="tb-btn">✕</span></span>
+              <span class="tb-btns">
+                <button class="tb-btn" type="button" data-act="minimize" aria-label="Minimize Editor">_</button>
+                <button class="tb-btn" type="button" data-act="close" aria-label="Close Editor">✕</button>
+              </span>
             </div>
-            <div class="body">
+            <a class="body" href="edit/">
               <div class="ico" aria-hidden="true">🛠️</div>
               <h2>Editor</h2>
               <p>Build and script scenes in the browser-based editor, then export a standalone game.</p>
               <span class="btn">🛠 Open editor</span>
-            </div>
-          </a>
+            </a>
+          </div>
         </main>
 
         <hr class="rule" />
@@ -720,6 +798,7 @@
     <ul>
       <li><a href="play/"><span aria-hidden="true">🎮</span> Play</a></li>
       <li><a href="edit/"><span aria-hidden="true">🛠️</span> Editor</a></li>
+      <li><a href="#" id="restore"><span aria-hidden="true">🔄</span> Restore windows</a></li>
     </ul>
   </nav>
 
@@ -727,6 +806,7 @@
     <button id="start" type="button" aria-expanded="false" aria-controls="startmenu">
       <span aria-hidden="true">🐄</span> Start
     </button>
+    <div id="tasks"></div>
     <div class="tray"><span aria-hidden="true">🔊</span> <span id="clock">--:--</span></div>
   </div>
 
@@ -784,6 +864,148 @@
       document.addEventListener("keydown", function (e) {
         if (e.key === "Escape") setOpen(false);
       });
+    })();
+
+    // --- windows: drag, minimize, maximize, close ---------------------------
+    (function () {
+      var tasks = document.getElementById("tasks");
+      var wins = [].slice.call(document.querySelectorAll("[data-window]"));
+      var top = 10;
+
+      // Dragging moves windows with a transform rather than by taking them out
+      // of flow, so the page never reflows underneath the one being dragged.
+      var offsets = new WeakMap();
+
+      function raise(win) {
+        win.style.zIndex = ++top;
+      }
+
+      function move(win, x, y) {
+        offsets.set(win, { x: x, y: y });
+        win.style.transform = x || y ? "translate(" + x + "px," + y + "px)" : "";
+      }
+
+      function show(win) {
+        // A nested window is useless while its parent is hidden, so opening one
+        // opens every window it lives inside too.
+        var el = win;
+        while (el) {
+          el.hidden = false;
+          el.dataset.state = "open";
+          if (el.task) {
+            el.task.hidden = false;
+            el.task.classList.remove("minimized");
+          }
+          el = el.parentElement ? el.parentElement.closest("[data-window]") : null;
+        }
+        raise(win);
+      }
+
+      function minimize(win) {
+        win.hidden = true;
+        win.dataset.state = "minimized";
+        if (win.task) win.task.classList.add("minimized");
+      }
+
+      function close(win) {
+        win.hidden = true;
+        win.classList.remove("maxed");
+        win.dataset.state = "closed";
+        if (win.task) win.task.hidden = true;
+      }
+
+      // The cards are windows nested inside the main window, so a plain
+      // querySelectorAll from the outer one would also match their title bars
+      // and buttons -- and closing a card would close its parent with it.
+      function own(win, selector) {
+        return [].slice.call(win.querySelectorAll(selector)).filter(function (el) {
+          return el.closest("[data-window]") === win;
+        });
+      }
+
+      wins.forEach(function (win) {
+        var bar = own(win, ".titlebar")[0];
+        var label = win.dataset.task || "WINDOW";
+
+        // Taskbar button: click to minimize/restore, exactly like the real one.
+        var task = document.createElement("button");
+        task.type = "button";
+        task.className = "task";
+        task.textContent = label;
+        task.title = label;
+        tasks.appendChild(task);
+        win.task = task;
+        win.dataset.state = "open";
+
+        task.addEventListener("click", function () {
+          if (win.dataset.state === "open") minimize(win);
+          else show(win);
+        });
+
+        win.addEventListener("pointerdown", function () { raise(win); }, true);
+
+        own(win, "[data-act]").forEach(function (btn) {
+          btn.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var act = btn.dataset.act;
+            if (act === "close") close(win);
+            else if (act === "minimize") minimize(win);
+            else if (act === "maximize") win.classList.toggle("maxed");
+          });
+        });
+
+        if (!bar) return;
+        var startX = 0, startY = 0, baseX = 0, baseY = 0, dragging = false;
+
+        bar.addEventListener("pointerdown", function (e) {
+          // Let the title bar buttons work; only bare title bar starts a drag.
+          if (e.target.closest("[data-act]")) return;
+          if (win.classList.contains("maxed")) return;
+          if (e.button !== undefined && e.button !== 0) return;
+
+          var at = offsets.get(win) || { x: 0, y: 0 };
+          dragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          baseX = at.x;
+          baseY = at.y;
+          raise(win);
+          bar.setPointerCapture(e.pointerId);
+          e.preventDefault();
+        });
+
+        bar.addEventListener("pointermove", function (e) {
+          if (!dragging) return;
+          move(win, baseX + (e.clientX - startX), baseY + (e.clientY - startY));
+        });
+
+        function end(e) {
+          if (!dragging) return;
+          dragging = false;
+          if (bar.hasPointerCapture(e.pointerId)) bar.releasePointerCapture(e.pointerId);
+        }
+        bar.addEventListener("pointerup", end);
+        bar.addEventListener("pointercancel", end);
+      });
+
+      // Start > Restore windows: undo every close, minimize and drag.
+      var restore = document.getElementById("restore");
+      if (restore) {
+        restore.addEventListener("click", function (e) {
+          e.preventDefault();
+          wins.forEach(function (win) {
+            win.hidden = false;
+            win.dataset.state = "open";
+            win.classList.remove("maxed");
+            move(win, 0, 0);
+            if (win.task) {
+              win.task.hidden = false;
+              win.task.classList.remove("minimized");
+            }
+          });
+        });
+      }
     })();
 
     // --- sparkle cursor trail (skipped on touch / reduced motion) -----------
