@@ -444,6 +444,15 @@ void GameServer::flushExplosions()
     pendingExplosions_.clear();
 }
 
+size_t GameServer::spawnedCount() const
+{
+    size_t n = 0;
+    for (const auto &[id, s] : sessions_)
+        if (s.spawned)
+            ++n;
+    return n;
+}
+
 void GameServer::sweepIdleSessions()
 {
     // A clean disconnect sends PlayerLeave via onDisconnect. But if the transport

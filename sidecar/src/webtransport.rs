@@ -25,13 +25,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use base64::Engine;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use wtransport::endpoint::{IncomingSession, SessionRequest};
 use wtransport::tls::Sha256DigestFmt;
 use wtransport::{Endpoint, Identity, ServerConfig};
 
 use crate::{
-    Relay, CH_RELIABLE, KIND_CONNECT, KIND_DISCONNECT, KIND_RELIABLE, KIND_UNRELIABLE,
+    query_param, Relay, CH_RELIABLE, KIND_CONNECT, KIND_DISCONNECT, KIND_RELIABLE, KIND_UNRELIABLE,
 };
 
 pub async fn run(bind_addr: String, relay: Arc<Relay>) -> Result<()> {
@@ -94,18 +94,33 @@ async fn handle(incoming: IncomingSession, relay: Arc<Relay>) -> Result<()> {
         session_request.forbidden().await;
         return Ok(());
     }
+    // Same room lookup as the WS path — `path()` carries the query string, and
+    // query_param splits on '?' and '&' so it reads either.
+    let room = query_param(Some(session_request.path()), "room");
+    let upstream = match relay.rooms.resolve(room) {
+        Some(addr) => addr,
+        None => {
+            println!("wt refused {ip}: unknown room {room:?}");
+            session_request.forbidden().await;
+            return Ok(());
+        }
+    };
     if !relay.acquire_ip(ip).await {
         println!("wt refused {ip}: per-IP connection cap reached");
         session_request.too_many_requests().await;
         return Ok(());
     }
 
-    let result = handle_accepted(session_request, &relay).await;
+    let result = handle_accepted(session_request, &relay, upstream).await;
     relay.release_ip(ip).await;
     result
 }
 
-async fn handle_accepted(session_request: SessionRequest, relay: &Arc<Relay>) -> Result<()> {
+async fn handle_accepted(
+    session_request: SessionRequest,
+    relay: &Arc<Relay>,
+    upstream: SocketAddr,
+) -> Result<()> {
     let connection = Arc::new(session_request.accept().await?);
 
     // The browser opens the one bidi stream used for every reliable message
@@ -114,9 +129,9 @@ async fn handle_accepted(session_request: SessionRequest, relay: &Arc<Relay>) ->
     let (mut reliable_tx, mut reliable_rx) = connection.accept_bi().await?;
 
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(u8, Vec<u8>)>();
-    let session = relay.register(out_tx).await;
-    relay.to_server(session, KIND_CONNECT, &[]).await;
-    println!("wt connect session={session}");
+    let (session, kill) = relay.register(out_tx, upstream).await;
+    relay.to_server(session, KIND_CONNECT, &[], upstream).await;
+    println!("wt connect session={session} room={upstream}");
 
     // server -> browser
     let conn_out = connection.clone();
@@ -140,9 +155,9 @@ async fn handle_accepted(session_request: SessionRequest, relay: &Arc<Relay>) ->
     });
 
     // browser -> server
-    let result = pump_incoming(&connection, &mut reliable_rx, relay, session).await;
+    let result = pump_incoming(&connection, &mut reliable_rx, relay, session, upstream, &kill).await;
 
-    relay.to_server(session, KIND_DISCONNECT, &[]).await;
+    relay.to_server(session, KIND_DISCONNECT, &[], upstream).await;
     relay.deregister(session).await;
     out_task.abort();
     println!("wt disconnect session={session}");
@@ -154,20 +169,25 @@ async fn pump_incoming(
     reliable_rx: &mut wtransport::RecvStream,
     relay: &Arc<Relay>,
     session: u32,
+    upstream: SocketAddr,
+    kill: &Notify,
 ) -> Result<()> {
     let mut len_buf = [0u8; 4];
     loop {
         tokio::select! {
+            // A room that stopped answering takes its sessions down with it;
+            // see Relay::sweep_upstreams.
+            _ = kill.notified() => return Ok(()),
             dgram = connection.receive_datagram() => {
                 let dgram = dgram?;
-                relay.to_server(session, KIND_UNRELIABLE, &dgram).await;
+                relay.to_server(session, KIND_UNRELIABLE, &dgram, upstream).await;
             }
             r = reliable_rx.read_exact(&mut len_buf) => {
                 r?;
                 let len = u32::from_le_bytes(len_buf) as usize;
                 let mut payload = vec![0u8; len];
                 reliable_rx.read_exact(&mut payload).await?;
-                relay.to_server(session, KIND_RELIABLE, &payload).await;
+                relay.to_server(session, KIND_RELIABLE, &payload, upstream).await;
             }
         }
     }

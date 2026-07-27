@@ -16,15 +16,20 @@
 //      WS listener to wss:// — needed to connect from an https origin.
 // Access gate (both transports): COW_ALLOWED_ORIGINS (comma list, empty=any),
 //      COW_JOIN_KEY (require ?key=<val>; empty=off), COW_MAX_CONN_PER_IP (default 8).
+// Rooms: COW_ROOMS ("<token>=<host:port>,..."), which makes `?room=<token>` select
+//      the upstream. Unset = single-upstream mode against COW_SERVER, exactly as
+//      before. COW_UPSTREAM_TIMEOUT (default 3s, 0=off) drops a session whose room
+//      has gone quiet.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, UdpSocket};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::{Response as HttpResponse, StatusCode};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -84,15 +89,66 @@ impl GateConfig {
     }
 }
 
+/// First value of `name` in `query` (a URL query string, or a path containing one).
+fn query_param<'a>(query: Option<&'a str>, name: &str) -> Option<&'a str> {
+    query?
+        .split(['?', '&'])
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| v)
+}
+
 /// True if `query` (a URL query string, or a path containing one) has `key=<want>`.
 fn query_has_key(query: Option<&str>, want: &str) -> bool {
-    let q = match query {
-        Some(q) => q,
-        None => return false,
-    };
-    q.split(['?', '&'])
-        .filter_map(|kv| kv.split_once('='))
-        .any(|(k, v)| k == "key" && v == want)
+    query_param(query, "key") == Some(want)
+}
+
+/// Maps a `?room=<token>` to the UDP address of the game server hosting it.
+///
+/// `Single` is the pre-rooms behaviour and stays the default: one upstream for
+/// every connection, `?room=` ignored. `Table` is a static token->address map for
+/// local multi-room testing. M1 adds a `Control` variant that asks the control
+/// plane over HTTP, which is what production will use — the room table is dynamic
+/// there because rooms are spawned and reaped on demand.
+enum RoomResolver {
+    Single(SocketAddr),
+    Table(HashMap<String, SocketAddr>),
+}
+
+impl RoomResolver {
+    fn resolve(&self, room: Option<&str>) -> Option<SocketAddr> {
+        match self {
+            RoomResolver::Single(addr) => Some(*addr),
+            RoomResolver::Table(map) => map.get(room?).copied(),
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            RoomResolver::Single(addr) => format!("single upstream {addr}"),
+            RoomResolver::Table(map) => {
+                let mut names: Vec<&str> = map.keys().map(|s| s.as_str()).collect();
+                names.sort_unstable();
+                format!("{} rooms [{}]", map.len(), names.join(","))
+            }
+        }
+    }
+}
+
+/// Parse COW_ROOMS: `"<token>=<host:port>,<token>=<host:port>"`. Names are
+/// resolved through the same path as COW_SERVER so a compose service name works.
+async fn parse_rooms(spec: &str) -> HashMap<String, SocketAddr> {
+    let mut map = HashMap::new();
+    for entry in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        match entry.split_once('=') {
+            Some((token, addr)) => {
+                let addr = resolve_host_port(addr.trim()).await;
+                map.insert(token.trim().to_string(), addr);
+            }
+            None => panic!("COW_ROOMS entry {entry:?} is not <token>=<host:port>"),
+        }
+    }
+    map
 }
 
 /// Build a 403 handshake rejection for the WS gate callback.
@@ -103,26 +159,60 @@ fn reject_403(msg: String) -> ErrorResponse {
         .expect("valid 403 response")
 }
 
-/// Shared relay state: the single UDP socket to the C++ server plus the live
-/// session table used to route server replies back to the right browser.
+/// One live browser connection and the room it is bridged to.
+struct Session {
+    tx: OutTx,
+    /// The room's UDP address. Fixed for the connection's lifetime, so the send
+    /// path takes it by argument and never has to lock the session table.
+    upstream: SocketAddr,
+    /// Signalled to tear this connection down from outside the bridge task.
+    kill: Arc<Notify>,
+    created: Instant,
+    /// When the room last sent us anything. `None` until the first datagram —
+    /// a session that never hears back at all is judged on `created` instead,
+    /// with a longer grace, because the browser may not have said hello yet.
+    last_inbound: Option<Instant>,
+}
+
+/// Shared relay state: one UDP socket toward the game servers plus the live
+/// session table used to route replies back to the right browser.
+///
+/// The socket is deliberately *not* `connect()`ed. With rooms it has to reach
+/// several servers, and `send_to` is the only way — but note the consequence:
+/// an unconnected UDP socket does not surface ICMP port-unreachable, so writes
+/// to a room that has exited vanish silently instead of erroring. That is what
+/// `sweep_upstreams` exists to catch.
 struct Relay {
     udp: UdpSocket,
-    sessions: Mutex<HashMap<u32, OutTx>>,
+    sessions: Mutex<HashMap<u32, Session>>,
     conns_per_ip: Mutex<HashMap<IpAddr, u32>>,
     next_id: AtomicU32,
     cfg: GateConfig,
+    rooms: RoomResolver,
+    /// Drop a session after this long with no word from its room. None = never.
+    upstream_timeout: Option<Duration>,
 }
 
+/// Grace period for a session that has never had a single reply, measured from
+/// connect. Longer than `upstream_timeout` because it covers the browser taking
+/// its time to send ClientHello — before that the server has nothing to say.
+const UPSTREAM_FIRST_REPLY_GRACE: Duration = Duration::from_secs(10);
+
 impl Relay {
-    async fn new(server_addr: SocketAddr, cfg: GateConfig) -> std::io::Result<Arc<Self>> {
+    async fn new(
+        rooms: RoomResolver,
+        cfg: GateConfig,
+        upstream_timeout: Option<Duration>,
+    ) -> std::io::Result<Arc<Self>> {
         let udp = UdpSocket::bind(("0.0.0.0", 0)).await?;
-        udp.connect(server_addr).await?;
         Ok(Arc::new(Relay {
             udp,
             sessions: Mutex::new(HashMap::new()),
             conns_per_ip: Mutex::new(HashMap::new()),
             next_id: AtomicU32::new(1),
             cfg,
+            rooms,
+            upstream_timeout,
         }))
     }
 
@@ -161,27 +251,42 @@ impl Relay {
         v
     }
 
-    async fn to_server(&self, session: u32, kind: u8, payload: &[u8]) {
-        let _ = self.udp.send(&Relay::frame(session, kind, payload)).await;
+    async fn to_server(&self, session: u32, kind: u8, payload: &[u8], upstream: SocketAddr) {
+        let _ = self
+            .udp
+            .send_to(&Relay::frame(session, kind, payload), upstream)
+            .await;
     }
 
-    async fn register(&self, tx: OutTx) -> u32 {
+    /// Claim a session id for a new browser connection. The returned Notify is
+    /// how `sweep_upstreams` (or anything else) asks the bridge task to stop.
+    async fn register(&self, tx: OutTx, upstream: SocketAddr) -> (u32, Arc<Notify>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.sessions.lock().await.insert(id, tx);
-        id
+        let kill = Arc::new(Notify::new());
+        self.sessions.lock().await.insert(
+            id,
+            Session {
+                tx,
+                upstream,
+                kill: kill.clone(),
+                created: Instant::now(),
+                last_inbound: None,
+            },
+        );
+        (id, kill)
     }
 
     async fn deregister(&self, id: u32) {
         self.sessions.lock().await.remove(&id);
     }
 
-    /// Read datagrams from the C++ server forever and fan each out to the
+    /// Read datagrams from the game servers forever and fan each out to the
     /// browser connection named by its session id.
     async fn run_udp_reader(self: Arc<Self>) {
         let mut buf = vec![0u8; 4096];
         loop {
-            let n = match self.udp.recv(&mut buf).await {
-                Ok(n) => n,
+            let (n, from) = match self.udp.recv_from(&mut buf).await {
+                Ok(v) => v,
                 Err(_) => continue,
             };
             if n < 5 {
@@ -195,8 +300,49 @@ impl Relay {
             } else {
                 CH_UNRELIABLE
             };
-            if let Some(tx) = self.sessions.lock().await.get(&session) {
-                let _ = tx.send((channel, payload));
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(&session) {
+                // Ignore a datagram claiming a session that belongs to a different
+                // room. Session ids are unique sidecar-wide so this should not
+                // happen, but a stale server that reused an id would otherwise be
+                // able to inject into someone else's world.
+                if s.upstream != from {
+                    continue;
+                }
+                s.last_inbound = Some(Instant::now());
+                let _ = s.tx.send((channel, payload));
+            }
+        }
+    }
+
+    /// Tear down sessions whose room has stopped answering.
+    ///
+    /// Necessary because the relay socket is unconnected: when a room process
+    /// exits, its port stops existing but our `send_to` keeps succeeding, so the
+    /// browser would sit in a world that no longer exists with no error anywhere.
+    /// Rooms send snapshots at 20 Hz, so a few seconds of silence is unambiguous.
+    async fn sweep_upstreams(self: Arc<Self>) {
+        let timeout = match self.upstream_timeout {
+            Some(t) => t,
+            None => return,
+        };
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            ticker.tick().await;
+            let now = Instant::now();
+            let sessions = self.sessions.lock().await;
+            for (id, s) in sessions.iter() {
+                let dead = match s.last_inbound {
+                    Some(t) => now.duration_since(t) >= timeout,
+                    None => now.duration_since(s.created) >= UPSTREAM_FIRST_REPLY_GRACE,
+                };
+                if dead {
+                    eprintln!(
+                        "session={id} room {} went silent, dropping connection",
+                        s.upstream
+                    );
+                    s.kill.notify_waiters();
+                }
             }
         }
     }
@@ -227,8 +373,13 @@ async fn bridge_ws<S>(stream: S, relay: &Arc<Relay>, peer: Option<SocketAddr>)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    // Check Origin + join key during the handshake; reject with 403 otherwise.
+    // Check Origin + join key + room during the handshake; reject with 403
+    // otherwise. The room lookup happens here (rather than after the upgrade) so
+    // a bad room token fails as a plain HTTP error the browser can report,
+    // instead of an immediately-closed WebSocket.
     let gate = relay.clone();
+    let resolved: Arc<std::sync::Mutex<Option<SocketAddr>>> = Arc::new(std::sync::Mutex::new(None));
+    let resolved_cb = resolved.clone();
     let ws = match tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, resp: Response| {
         let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
         if !gate.cfg.origin_allowed(origin) {
@@ -236,6 +387,11 @@ where
         }
         if !gate.cfg.key_ok(req.uri().query()) {
             return Err(reject_403("missing or invalid join key".into()));
+        }
+        let room = query_param(req.uri().query(), "room");
+        match gate.rooms.resolve(room) {
+            Some(addr) => *resolved_cb.lock().unwrap() = Some(addr),
+            None => return Err(reject_403(format!("unknown room: {room:?}"))),
         }
         Ok(resp)
     })
@@ -247,12 +403,13 @@ where
             return;
         }
     };
+    let upstream = resolved.lock().unwrap().expect("room resolved during handshake");
     let (mut sink, mut source) = ws.split();
 
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<(u8, Vec<u8>)>();
-    let session = relay.register(out_tx).await;
-    relay.to_server(session, KIND_CONNECT, &[]).await;
-    println!("ws connect session={session} peer={peer:?}");
+    let (session, kill) = relay.register(out_tx, upstream).await;
+    relay.to_server(session, KIND_CONNECT, &[], upstream).await;
+    println!("ws connect session={session} peer={peer:?} room={upstream}");
 
     // server -> browser: prefix each payload with its channel byte.
     let out_task = tokio::spawn(async move {
@@ -266,8 +423,17 @@ where
         }
     });
 
-    // browser -> server: first byte selects the channel.
-    while let Some(item) = source.next().await {
+    // browser -> server: first byte selects the channel. Also watch `kill`, so a
+    // room that dies takes its browser connections down with it instead of
+    // leaving them parked on a socket nobody is reading.
+    loop {
+        let item = tokio::select! {
+            item = source.next() => match item {
+                Some(item) => item,
+                None => break,
+            },
+            _ = kill.notified() => break,
+        };
         match item {
             Ok(WsMessage::Binary(data)) => {
                 if data.is_empty() {
@@ -278,14 +444,14 @@ where
                 } else {
                     KIND_UNRELIABLE
                 };
-                relay.to_server(session, kind, &data[1..]).await;
+                relay.to_server(session, kind, &data[1..], upstream).await;
             }
             Ok(WsMessage::Close(_)) | Err(_) => break,
             _ => {}
         }
     }
 
-    relay.to_server(session, KIND_DISCONNECT, &[]).await;
+    relay.to_server(session, KIND_DISCONNECT, &[], upstream).await;
     relay.deregister(session).await;
     out_task.abort();
     println!("ws disconnect session={session}");
@@ -295,14 +461,14 @@ fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
-/// Resolve COW_SERVER, which is documented as `host:port` — so it has to accept a
-/// DNS name, not just an IP literal. `"server:4433".parse::<SocketAddr>()` fails,
-/// and that is exactly what docker compose passes (the service name on the
-/// bridge network), so the name must go through a resolver.
+/// Resolve a `host:port` spec — so it has to accept a DNS name, not just an IP
+/// literal. `"server:4433".parse::<SocketAddr>()` fails, and that is exactly what
+/// docker compose passes (the service name on the bridge network), so the name
+/// must go through a resolver.
 ///
 /// Retries briefly: compose's `depends_on` only waits for the peer container to
 /// *start*, so on a cold `up` the embedded DNS record can lag us by a moment.
-async fn resolve_server(spec: &str) -> SocketAddr {
+async fn resolve_host_port(spec: &str) -> SocketAddr {
     if let Ok(addr) = spec.parse::<SocketAddr>() {
         return addr;
     }
@@ -315,25 +481,40 @@ async fn resolve_server(spec: &str) -> SocketAddr {
                 addrs.sort_by_key(|a| !a.is_ipv4());
                 if let Some(addr) = addrs.first() {
                     if attempt > 0 {
-                        println!("resolved COW_SERVER {spec} -> {addr} after {attempt}s");
+                        println!("resolved {spec} -> {addr} after {attempt}s");
                     }
                     return *addr;
                 }
             }
             Err(e) if attempt == 29 => {
-                panic!("COW_SERVER {spec:?} did not resolve after 30s: {e}")
+                panic!("{spec:?} did not resolve after 30s: {e}")
             }
             Err(_) => {}
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
-    panic!("COW_SERVER {spec:?} resolved to no usable address");
+    panic!("{spec:?} resolved to no usable address");
 }
 
 #[tokio::main]
 async fn main() {
-    let server_spec = env_or("COW_SERVER", "127.0.0.1:4433");
-    let server_addr = resolve_server(&server_spec).await;
+    // COW_ROOMS, when set, replaces the single COW_SERVER upstream with a
+    // `?room=`-keyed table. COW_SERVER is not even resolved in that mode, so a
+    // rooms deployment does not need a default game server to exist.
+    let rooms_spec = env_or("COW_ROOMS", "");
+    let rooms = if rooms_spec.trim().is_empty() {
+        let server_spec = env_or("COW_SERVER", "127.0.0.1:4433");
+        RoomResolver::Single(resolve_host_port(&server_spec).await)
+    } else {
+        RoomResolver::Table(parse_rooms(&rooms_spec).await)
+    };
+
+    let upstream_timeout = match env_or("COW_UPSTREAM_TIMEOUT", "3").parse::<f64>() {
+        Ok(s) if s > 0.0 => Some(Duration::from_secs_f64(s)),
+        Ok(_) => None,
+        Err(e) => panic!("COW_UPSTREAM_TIMEOUT must be a number of seconds: {e}"),
+    };
+
     let ws_addr = env_or("COW_WS", "0.0.0.0:8080");
 
     let cfg = GateConfig::from_env();
@@ -343,11 +524,21 @@ async fn main() {
         if cfg.join_key.is_some() { "required" } else { "none" },
         if cfg.max_conn_per_ip == 0 { "unlimited".into() } else { cfg.max_conn_per_ip.to_string() },
     );
+    println!(
+        "routing: {}  upstream_timeout={}",
+        rooms.describe(),
+        match upstream_timeout {
+            Some(t) => format!("{:.1}s", t.as_secs_f64()),
+            None => "off".into(),
+        }
+    );
 
-    let relay = Relay::new(server_addr, cfg)
+    let routing = rooms.describe();
+    let relay = Relay::new(rooms, cfg, upstream_timeout)
         .await
         .expect("failed to open UDP socket to server");
     tokio::spawn(relay.clone().run_udp_reader());
+    tokio::spawn(relay.clone().sweep_upstreams());
 
     #[cfg(feature = "webtransport")]
     {
@@ -370,7 +561,7 @@ async fn main() {
     // https origin like cowengine.com can connect. Otherwise plain ws:// (dev).
     #[cfg(feature = "tls")]
     if let Some(acceptor) = tls::acceptor_from_env() {
-        println!("cowengine-sidecar: WSS wss://{ws_addr}  ->  udp {server_addr}");
+        println!("cowengine-sidecar: WSS wss://{ws_addr}  ->  {routing}");
         loop {
             match ws_listener.accept().await {
                 Ok((stream, peer)) => {
@@ -388,7 +579,7 @@ async fn main() {
         }
     }
 
-    println!("cowengine-sidecar: WS ws://{ws_addr}  ->  udp {server_addr}");
+    println!("cowengine-sidecar: WS ws://{ws_addr}  ->  {routing}");
     #[cfg(feature = "tls")]
     println!("(set COW_TLS_CERT + COW_TLS_KEY to serve wss:// instead)");
     #[cfg(not(feature = "tls"))]

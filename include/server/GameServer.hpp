@@ -49,6 +49,10 @@ public:
 
     uint32_t serverTick() const { return serverTick_; }
     size_t playerCount() const { return sessions_.size(); }
+    // Sessions that got as far as ClientHello and own a player entity. This is
+    // the number a lobby means by "players in this room"; playerCount() also
+    // counts sockets that connected but never spoke a compatible protocol.
+    size_t spawnedCount() const;
 
 private:
     struct Session
