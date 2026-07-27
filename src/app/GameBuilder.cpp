@@ -279,11 +279,34 @@ namespace
             const char *v = std::getenv(k);
             return v ? std::string(v) : std::string();
         };
+        auto normalizeTransportUrl = [](std::string url) -> std::string {
+            if (url.empty())
+                return url;
+            auto scheme_end = url.find("://");
+            if (scheme_end == std::string::npos)
+                return url;
+            std::string scheme = url.substr(0, scheme_end);
+            if (scheme != "ws" && scheme != "wss" && scheme != "http" && scheme != "https")
+                return url;
+            auto path_pos = url.find('/', scheme_end + 3);
+            if (path_pos == std::string::npos)
+            {
+                if (scheme == "ws" || scheme == "wss")
+                    url += "/net";
+                return url;
+            }
+            if (path_pos == url.size() - 1 && (scheme == "ws" || scheme == "wss"))
+                url += "net";
+            return url;
+        };
         std::string ws = env("COWENGINE_SERVER_WS");
         std::string wt = env("COWENGINE_SERVER_WT");
         std::string certHash = env("COWENGINE_SERVER_CERTHASH");
         if (ws.empty() && wt.empty())
             return;
+
+        ws = normalizeTransportUrl(std::move(ws));
+        wt = normalizeTransportUrl(std::move(wt));
 
         // These values are URLs / base64 hashes with no quotes or backslashes, so
         // a plain quoted literal is safe.

@@ -393,6 +393,23 @@
             return typeof __COWENGINE_API__ === 'string' ? __COWENGINE_API__.replace(/\/+$/, '') : '';
         }
 
+        function normalizeTransportUrl(url) {
+            if (!url)
+                return '';
+            try {
+                var parsed = new URL(url, location.href);
+                if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:' && parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+                    return url;
+                if (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+                    return parsed.toString().replace(/\/+$/, '');
+                if (!parsed.pathname || parsed.pathname === '/')
+                    parsed.pathname = '/net';
+                return parsed.toString();
+            } catch (e) {
+                return url;
+            }
+        }
+
         function readRememberedName() {
             try { return localStorage.getItem(COW_NAME_KEY) || ''; } catch (e) { return ''; }
         }
@@ -661,11 +678,13 @@
                 if (q && q.get('singleplayer'))
                     return {};
                 var c = Object.assign({}, __COWENGINE_SERVER__ || {});
+                if (c.wt) c.wt = normalizeTransportUrl(c.wt);
+                if (c.ws) c.ws = normalizeTransportUrl(c.ws);
                 var remembered = readRememberedName();
                 c.name = remembered;
                 if (q) {
-                    if (q.get('wt')) c.wt = q.get('wt');
-                    if (q.get('ws')) c.ws = q.get('ws');
+                    if (q.get('wt')) c.wt = normalizeTransportUrl(q.get('wt'));
+                    if (q.get('ws')) c.ws = normalizeTransportUrl(q.get('ws'));
                     if (q.get('certhash')) c.certHash = q.get('certhash');
                     if (q.get('name')) c.name = q.get('name');
                     var room = q.get('room');

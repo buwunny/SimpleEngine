@@ -50,8 +50,9 @@ jobs:
           # /edit uses it to enable Build > Publish.
           COWENGINE_API: ${{ vars.COWENGINE_API }}
           # Set repository variable COWENGINE_SERVER_WS to bake the multiplayer
-          # server into the published game, e.g. wss://game.cowengine.com
-          # (and optionally COWENGINE_SERVER_WT for the WebTransport URL).
+          # server into the published game, e.g. wss://game.cowengine.com/net
+          # (and optionally COWENGINE_SERVER_WT for the WebTransport URL,
+          # usually https://game.cowengine.com:4443/net).
           # Leave unset to publish a single-player game (players can still opt
           # in with ?ws=/?wt= query params).
           COWENGINE_SERVER_WS: ${{ vars.COWENGINE_SERVER_WS }}
@@ -70,10 +71,38 @@ jobs:
           if [ -n "$PAGES_CNAME" ]; then echo "$PAGES_CNAME" > site/CNAME; echo "CNAME -> $PAGES_CNAME"; fi
           python3 - <<'PY'
           import os
+          from urllib.parse import urlparse, urlunparse
 
           api = os.environ.get("COWENGINE_API", "").strip()
           ws = os.environ.get("COWENGINE_SERVER_WS", "").strip()
           wt = os.environ.get("COWENGINE_SERVER_WT", "").strip()
+
+          def derive_api_from_transport(url: str) -> str:
+            if not url:
+              return ""
+            parsed = urlparse(url)
+            scheme = {"ws": "http", "wss": "https"}.get(parsed.scheme, parsed.scheme)
+            if not scheme or not parsed.netloc:
+              return ""
+            return urlunparse((scheme, parsed.netloc, "", "", "", ""))
+
+          def normalize_websocket_url(url: str) -> str:
+            if not url:
+              return ""
+            parsed = urlparse(url)
+            if parsed.scheme not in ("ws", "wss") or not parsed.netloc:
+              return url
+            path = parsed.path or ""
+            if not path or path == "/":
+              path = "/net"
+            elif not path.startswith("/"):
+              path = "/" + path
+            return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, parsed.query, parsed.fragment))
+
+          ws = normalize_websocket_url(ws)
+          wt = normalize_websocket_url(wt)
+          if not api:
+            api = derive_api_from_transport(ws) or derive_api_from_transport(wt)
 
           if api:
             for path in ["site/play/index.html", "site/edit/index.html"]:
