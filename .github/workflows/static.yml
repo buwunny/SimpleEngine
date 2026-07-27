@@ -69,45 +69,45 @@ jobs:
           touch site/.nojekyll
           if [ -n "$PAGES_CNAME" ]; then echo "$PAGES_CNAME" > site/CNAME; echo "CNAME -> $PAGES_CNAME"; fi
           python3 - <<'PY'
-import os
+          import os
 
-api = os.environ.get("COWENGINE_API", "").strip()
-ws = os.environ.get("COWENGINE_SERVER_WS", "").strip()
-wt = os.environ.get("COWENGINE_SERVER_WT", "").strip()
+          api = os.environ.get("COWENGINE_API", "").strip()
+          ws = os.environ.get("COWENGINE_SERVER_WS", "").strip()
+          wt = os.environ.get("COWENGINE_SERVER_WT", "").strip()
 
-if api:
-  for path in ["site/play/index.html", "site/edit/index.html"]:
-    with open(path, encoding="utf-8") as f:
-      html = f.read()
-    marker = "var __COWENGINE_API__ = null;"
-    if marker not in html:
-      print(f"WARNING: API marker not found in {path}")
-      continue
-    html = html.replace(marker, f"var __COWENGINE_API__ = '{api}';")
-    with open(path, "w", encoding="utf-8") as f:
-      f.write(html)
-  print(f"Baked control API into /play and /edit: {api}")
-else:
-  print("No COWENGINE_API set — /play lobby stays disabled and /edit publish stays unavailable.")
+          if api:
+            for path in ["site/play/index.html", "site/edit/index.html"]:
+              with open(path, encoding="utf-8") as f:
+                html = f.read()
+              marker = "var __COWENGINE_API__ = null;"
+              if marker not in html:
+                print(f"WARNING: API marker not found in {path}")
+                continue
+              html = html.replace(marker, f"var __COWENGINE_API__ = '{api}';")
+              with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+            print(f"Baked control API into /play and /edit: {api}")
+          else:
+            print("No COWENGINE_API set — /play lobby stays disabled and /edit publish stays unavailable.")
 
-if ws or wt:
-  fields = []
-  if ws: fields.append(f'ws:"{ws}"')
-  if wt: fields.append(f'wt:"{wt}"')
-  obj = "{" + ",".join(fields) + "}"
-  path = "site/play/index.html"
-  with open(path, encoding="utf-8") as f:
-    html = f.read()
-  marker = "var __COWENGINE_SERVER__ = null;"
-  if marker not in html:
-    print("WARNING: server-config marker not found in game index.html")
-  else:
-    html = html.replace(marker, f"var __COWENGINE_SERVER__ = {obj};")
-    with open(path, "w", encoding="utf-8") as f:
-      f.write(html)
-    print(f"Baked server config into /play: {obj}")
-else:
-  print("No COWENGINE_SERVER_WS/_WT set — game published single-player.")
+          if ws or wt:
+            fields = []
+            if ws: fields.append(f'ws:"{ws}"')
+            if wt: fields.append(f'wt:"{wt}"')
+            obj = "{" + ",".join(fields) + "}"
+            path = "site/play/index.html"
+            with open(path, encoding="utf-8") as f:
+              html = f.read()
+            marker = "var __COWENGINE_SERVER__ = null;"
+            if marker not in html:
+              print("WARNING: server-config marker not found in game index.html")
+            else:
+              html = html.replace(marker, f"var __COWENGINE_SERVER__ = {obj};")
+              with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+              print(f"Baked server config into /play: {obj}")
+          else:
+            print("No COWENGINE_SERVER_WS/_WT set — game published single-player.")
           PY
         shell: bash
 
