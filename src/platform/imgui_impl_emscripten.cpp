@@ -2,6 +2,7 @@
 #include "platform/imgui_impl_emscripten.h"
 #include <imgui.h>
 #if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
 #include <emscripten/html5.h>
 #include <cstring>
 #include <cctype>
@@ -222,6 +223,20 @@ void ImGui_ImplEmscripten_NewFrame()
         dpr = 1.0f;
     io.DisplaySize = ImVec2((float)w / dpr, (float)h / dpr);
     io.DisplayFramebufferScale = ImVec2(dpr, dpr);
+
+    // ImGui needs a real wall-clock DeltaTime to time double-clicks, key
+    // repeats, tooltips, etc. Without a backend setting it, it stays pinned
+    // to the default-constructed 1/60s forever, so on any browser running
+    // above 60fps (120/144Hz displays are routine now) ImGui's internal
+    // clock outruns real time and the ~0.3s double-click window closes
+    // before a real double-click lands -- e.g. drag/slider fields never
+    // switch into text-entry mode.
+    static double s_lastTime = 0.0;
+    double now = emscripten_get_now() / 1000.0;
+    io.DeltaTime = s_lastTime > 0.0 ? (float)(now - s_lastTime) : (float)(1.0 / 60.0);
+    if (io.DeltaTime <= 0.0f)
+        io.DeltaTime = 1.0f / 60.0f;
+    s_lastTime = now;
 }
 
 #endif
