@@ -27,6 +27,7 @@ int main()
         int despawns = 0;
         std::map<uint32_t, std::set<uint32_t>> liveNetIdsPerSession;
         size_t lastSnapshotEntities = 0;
+        std::set<uint32_t> lastSnapshotNetIds;
     } out;
 
     GameServer server;
@@ -49,6 +50,8 @@ int main()
         else if (const auto *snap = std::get_if<Snapshot>(&m))
         {
             out.lastSnapshotEntities = snap->entities.size();
+            for (const auto &e : snap->entities)
+                out.lastSnapshotNetIds.insert(e.netId);
         }
     });
 
@@ -76,6 +79,16 @@ int main()
     printf("baseline snapshot entities: %zu\n", baseline);
     CHECK(baseline > 0);
 
+    // The scene ids in play before any reset. These are what a client loading
+    // this scene for the first time derives locally, so they are the contract
+    // every later reset has to keep.
+    std::vector<uint32_t> sceneIdsAtInit;
+    for (uint32_t id : out.lastSnapshotNetIds)
+        if (id < kPlayerNetIdBase)
+            sceneIdsAtInit.push_back(id);
+    printf("scene netIds at init: %zu\n", sceneIdsAtInit.size());
+    CHECK(!sceneIdsAtInit.empty());
+
     for (int reset = 1; reset <= 6; ++reset)
     {
         server.requestSceneReset();
@@ -90,11 +103,62 @@ int main()
         CHECK(out.lastSnapshotEntities == baseline);
     }
 
-    // The runtime-spawn ids handed out to the reset scene's dynamic objects
-    // should never repeat across sessions or resets (each session's tracked
-    // set is fully drained by matching despawns above, so nothing lingers).
+    // A reset must NOT re-announce the scene's own objects.
+    //
+    // This used to assert the opposite -- that every reset handed the scene's
+    // dynamic bodies fresh runtime-spawn ids -- which looked healthy because the
+    // spawns and despawns balanced. They were balanced and wrong: renumbering
+    // the scene into the spawn id range breaks the one thing those ids exist to
+    // guarantee, that a client can derive them by loading the same file. A
+    // client reloading after a reset then claimed the ids it derived locally,
+    // received nothing for them, and rendered them as inert ghosts beside the
+    // live spawn-range copies. See assignSceneNetIds().
+    CHECK(out.spawns == 0);
     for (auto &[session, live] : out.liveNetIdsPerSession)
-        CHECK(live.size() == baseline - 2); // minus the two player entities
+        CHECK(live.empty());
+
+    // Nothing was spawned, so nothing should have been despawned either: the
+    // scene bodies are rebuilt under their original ids and the client's
+    // representation of each stays valid across the reset.
+    CHECK(out.despawns == 0);
+
+    // ---- the reported repro: reset the scene, then RELOAD the page ---------
+    //
+    // A reload is a brand-new client process, so it derives the scene's netIds
+    // from a fresh entity counter -- it has no idea the world has been reset six
+    // times. Whatever the server replicates after a reset therefore has to match
+    // what a first-time loader would compute, which is the ids captured at init.
+    //
+    // The ghost duplicates came from exactly this gap: the fresh client claimed
+    // 2..5 and got nothing, while the spawn replay built live copies alongside.
+    {
+        const std::set<uint32_t> derivedByAFreshClient(sceneIdsAtInit.begin(),
+                                                       sceneIdsAtInit.end());
+
+        out.lastSnapshotNetIds.clear();
+        server.onConnect(3);
+        ClientHello hello3;
+        hello3.name = "Latecomer";
+        server.onMessage(3, hello3);
+        settle(10);
+
+        // Every scene id the fresh client derives must be one the server is
+        // actually replicating, or that object is an inert ghost on its screen.
+        for (uint32_t id : derivedByAFreshClient)
+            CHECK(out.lastSnapshotNetIds.count(id) == 1);
+
+        // And the reverse: nothing in the spawn range should exist for a scene
+        // that never ran a spawning script, or the client builds a second copy
+        // of an object it already has.
+        size_t spawnRange = 0;
+        for (uint32_t id : out.lastSnapshotNetIds)
+            if (id >= net::kSpawnNetIdBase)
+                ++spawnRange;
+        CHECK(spawnRange == 0);
+
+        printf("fresh client after %d resets: scene ids %zu/%zu present, %zu spawn-range\n",
+               6, derivedByAFreshClient.size(), derivedByAFreshClient.size(), spawnRange);
+    }
 
     if (failures == 0) printf("ALL PASS\n");
     else printf("%d FAILURES\n", failures);

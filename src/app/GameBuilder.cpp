@@ -736,11 +736,17 @@ namespace
 
     // state: 0 idle, 1 pending, 2 complete (check status), 3 transport failure
     EM_JS(void, em_publish_start, (const char *url, const char *method,
-                                   const char *editKey, const char *body), {
+                                   const char *editKey, const char *publishKey,
+                                   const char *body), {
         window.__cowPublish = { state: 1, status: 0, text: '' };
         var headers = { 'Content-Type': 'application/json' };
+        // Two different secrets: the edit key is per-game and proves you own
+        // this one, the publish key is the server's invite and proves you may
+        // publish at all. An update sends both.
         var key = UTF8ToString(editKey);
         if (key) headers['X-Cow-Edit-Key'] = key;
+        var pub = UTF8ToString(publishKey);
+        if (pub) headers['X-Cow-Publish-Key'] = pub;
         fetch(UTF8ToString(url), {
             method: UTF8ToString(method),
             headers: headers,
@@ -833,6 +839,22 @@ namespace
         savePublishStore(store);
     }
 
+    // The server's invite key, kept alongside the per-game edit keys so it is
+    // typed once rather than on every publish.
+    std::string savedPublishKey()
+    {
+        nlohmann::json store = loadPublishStore();
+        auto it = store.find("publish_key");
+        return (it != store.end() && it->is_string()) ? it->get<std::string>() : std::string();
+    }
+
+    void rememberPublishKey(const std::string &key)
+    {
+        nlohmann::json store = loadPublishStore();
+        store["publish_key"] = key;
+        savePublishStore(store);
+    }
+
     // Interpret a completed HTTP exchange. Shared by the web and native paths so
     // the success and failure wording cannot drift between them.
     void applyPublishResult(long status, const std::string &payload)
@@ -893,6 +915,11 @@ std::string GameBuilder::lastPublishedId()
     return (it != store.end() && it->is_string()) ? it->get<std::string>() : std::string();
 }
 
+std::string GameBuilder::publishKey()
+{
+    return savedPublishKey();
+}
+
 std::string GameBuilder::buildBundleJson(Scene *scene, const std::string &title,
                                          const std::string &description)
 {
@@ -927,6 +954,7 @@ std::string GameBuilder::buildBundleJson(Scene *scene, const std::string &title,
 
 bool GameBuilder::publishStart(Scene *scene, const std::string &title,
                                const std::string &description,
+                               const std::string &publishKey,
                                const std::function<void(const std::string &)> &log)
 {
     auto note = [&](const std::string &s) { if (log) log(s); };
@@ -949,6 +977,10 @@ bool GameBuilder::publishStart(Scene *scene, const std::string &title,
         return false;
     }
 
+    // Remember the invite key so it is typed once, not once per publish. An
+    // empty one is stored too — that is how you clear a key you no longer want.
+    rememberPublishKey(publishKey);
+
     // Update the existing game when we still hold its key; otherwise create one.
     const std::string previous = lastPublishedId();
     const std::string key = editKeyFor(previous);
@@ -963,7 +995,7 @@ bool GameBuilder::publishStart(Scene *scene, const std::string &title,
     g_publish = PublishStatus{PublishState::Pending, "Uploading...", update ? previous : "", {}, 0};
 
 #if defined(__EMSCRIPTEN__)
-    em_publish_start(url.c_str(), method, key.c_str(), body.c_str());
+    em_publish_start(url.c_str(), method, key.c_str(), publishKey.c_str(), body.c_str());
     return true;
 #else
     // Native path shells out to curl. The editor is a developer tool here and a
@@ -990,6 +1022,11 @@ bool GameBuilder::publishStart(Scene *scene, const std::string &title,
                       " -H 'Content-Type: application/json'";
     if (!key.empty())
         cmd += " -H 'X-Cow-Edit-Key: " + key + "'";
+    // Only hex/base64-ish secrets are expected here, but this is built into a
+    // shell command, so refuse anything that could end the quoting.
+    if (!publishKey.empty() &&
+        publishKey.find_first_of("'\\\"`$;&|<>\n\r") == std::string::npos)
+        cmd += " -H 'X-Cow-Publish-Key: " + publishKey + "'";
     cmd += " -w '\\n%{http_code}' --data-binary @" + bodyPath.string() + " '" + url + "' 2>&1";
 
     std::string out;

@@ -91,6 +91,9 @@ private:
     bool publishModalJustOpened = false;
     char publishTitle[80] = {};
     char publishDescription[240] = {};
+    // The server's invite key (COW_PUBLISH_TOKENS). Prefilled from the last
+    // publish, so it is typed once rather than every time.
+    char publishKey[96] = {};
 
     std::unique_ptr<editor::WorkspacePanel> workspacePanel;
     std::unique_ptr<editor::HierarchyPanel> hierarchyPanel;

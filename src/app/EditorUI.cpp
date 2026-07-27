@@ -302,6 +302,12 @@ void EditorUI::drawPublishModal()
         publishModalJustOpened = false;
         if (publishTitle[0] == '\0')
             std::snprintf(publishTitle, sizeof(publishTitle), "My CowEngine Game");
+        // Prefill from the last publish so a returning author never retypes it.
+        if (publishKey[0] == '\0')
+        {
+            const std::string saved = GameBuilder::publishKey();
+            std::snprintf(publishKey, sizeof(publishKey), "%s", saved.c_str());
+        }
     }
 
     ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
@@ -330,6 +336,15 @@ void EditorUI::drawPublishModal()
     ImGui::BeginDisabled(busy);
     ui95::InputText("Title", publishTitle, sizeof(publishTitle));
     ui95::InputText("Description", publishDescription, sizeof(publishDescription));
+    // Password-style: this is a shared secret, and an editor is a thing people
+    // screen-share and stream.
+    ui95::InputText("Publish key", publishKey, sizeof(publishKey),
+                    ImGuiInputTextFlags_Password);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("The server's invite key, if it has one. Servers that\n"
+                          "allow open publishing ignore this. Not the same as a\n"
+                          "game's edit key — that one is issued to you on publish\n"
+                          "and is remembered automatically.");
     ImGui::EndDisabled();
 
     ImGui::Spacing();
@@ -378,7 +393,7 @@ void EditorUI::drawPublishModal()
     if (ui95::Button(existing.empty() ? "Publish" : "Publish update"))
     {
         GameBuilder::publishStart(
-            ctx.scene, publishTitle, publishDescription,
+            ctx.scene, publishTitle, publishDescription, publishKey,
             [this](const std::string &line)
             { ctx.addLog(line, ImVec4(0.7f, 0.85f, 1.0f, 1.0f)); });
     }

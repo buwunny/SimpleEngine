@@ -73,6 +73,9 @@ private:
     // world from the scene as loaded, sparing every connected player, and
     // puts each of them back at their spawn point. See Scene::requestReset.
     void applyPendingReset();
+    // Give the scene's dynamic bodies their replication ids. `firstLoad`
+    // records them; a reset replays the recorded ones onto the rebuilt scene.
+    void assignSceneNetIds(bool firstLoad);
     net::Snapshot buildSnapshot(uint32_t ackSeq) const;
     // Assign NetIds to newly script-spawned bodies and broadcast SpawnEntity so
     // clients build a visual for each. Called once per tick after scripts run.
@@ -97,6 +100,17 @@ private:
     uint32_t nextPlayerIdx_ = 0;                      // -> net::kPlayerNetIdBase + idx
     uint32_t nextSpawnNetId_ = 0;                     // -> net::kSpawnNetIdBase + counter
     std::vector<net::SpawnEntity> spawnedObjects_;    // for late-join replay
+    // The netIds handed to the scene's own dynamic bodies at load, in load
+    // order. Kept so a reset can give the rebuilt scene the *same* ids: a
+    // freshly loaded client derives them from its own entity counter, which
+    // knows nothing about how many times this world has been reset.
+    std::vector<uint32_t> sceneNetIds_;
+    // Set only while resetToInitial() is tearing the world down. A scene body
+    // destroyed in that window is about to be rebuilt under the same netId, so
+    // announcing its removal would make clients drop a representation that is
+    // still live. A script calling destroy() on one outside a reset is a real
+    // removal and must still be announced, hence a window rather than a rule.
+    bool resettingScene_ = false;
     std::vector<uint32_t> pendingDespawns_;           // netIds destroyed this tick
     std::vector<net::Explosion> pendingExplosions_;   // blasts fired this tick
     void sweepIdleSessions();

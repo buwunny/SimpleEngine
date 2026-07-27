@@ -85,9 +85,17 @@ public:
     // Begin a publish. If this project was published before and its edit key is
     // known, this updates that game (a new version) instead of creating one.
     // Returns false if a publish is already in flight or none is possible.
+    //
+    // `publishKey` is the server's invite key (COW_PUBLISH_TOKENS), sent as
+    // X-Cow-Publish-Key. Servers with no allow-list ignore it. It is remembered
+    // between publishes, so the UI only has to ask once — see savedPublishKey().
     static bool publishStart(Scene *scene, const std::string &title,
                              const std::string &description,
+                             const std::string &publishKey,
                              const std::function<void(const std::string &)> &log);
+
+    // The invite key this editor last published with, for prefilling the field.
+    static std::string publishKey();
 
     // Poll an in-flight publish. Once it returns Success or Failed the result is
     // latched until the next publishStart().

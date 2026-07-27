@@ -23,6 +23,7 @@
 //   COW_MAX_BUNDLE_BYTES  publish size cap            (3 MiB)
 //   COW_MAX_BUNDLE_FILES  publish file-count cap      (200)
 //   COW_PUBLISH_OPEN      "1" to open publishing      (off until M2 hardening)
+//   COW_PUBLISH_TOKENS    comma-separated publish keys; any set = invite-only
 
 mod api;
 mod bundle;
@@ -54,6 +55,14 @@ pub struct Config {
     /// the language has no execution budget yet (M2), so opening this before
     /// that lands means any stranger can pin a core with `while true`.
     pub publish_open: bool,
+    /// Shared secrets that admit a *new* publish, from COW_PUBLISH_TOKENS.
+    ///
+    /// Non-empty means invite-only: the catalog stays public to read, but
+    /// creating a game needs one of these in X-Cow-Publish-Key. This is the
+    /// coarse "may you publish at all" gate; the per-game `edit_key` returned
+    /// by a publish is a different, finer secret controlling who may change
+    /// *that* game afterwards. Empty falls back to `publish_open`.
+    pub publish_tokens: Vec<String>,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -113,6 +122,15 @@ async fn main() {
         public_wt: env_opt("COW_PUBLIC_WT"),
         public_cert_hash: env_opt("COW_PUBLIC_CERTHASH"),
         publish_open: env_or("COW_PUBLISH_OPEN", "0") == "1",
+        publish_tokens: env_opt("COW_PUBLISH_TOKENS")
+            .map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
     };
 
     let room_mgr = RoomManager::new(room_cfg.clone())
@@ -129,7 +147,13 @@ async fn main() {
     );
     println!(
         "  publish {} (max {} bytes / {} files)",
-        if cfg.publish_open { "OPEN" } else { "closed (set COW_PUBLISH_OPEN=1)" },
+        if !cfg.publish_tokens.is_empty() {
+            format!("INVITE-ONLY ({} key(s))", cfg.publish_tokens.len())
+        } else if cfg.publish_open {
+            "OPEN".to_string()
+        } else {
+            "closed (set COW_PUBLISH_OPEN=1 or COW_PUBLISH_TOKENS)".to_string()
+        },
         cfg.max_bundle_bytes, cfg.max_bundle_files
     );
     println!("  join -> ws={:?} wt={:?}", cfg.public_ws, cfg.public_wt);

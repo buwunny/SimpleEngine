@@ -115,14 +115,7 @@ bool GameServer::init(const std::string &scenePath)
     // spawn message is needed — the client already has these entities and just
     // stops simulating them and follows our snapshots. Static (mass 0) bodies
     // never move, so they aren't replicated.
-    {
-        auto view = scene_.registry().view<ecs::Physics, ecs::Identity>();
-        for (auto e : view)
-        {
-            if (view.get<ecs::Physics>(e).mass > 0.0)
-                scene_.registry().emplace<ecs::NetId>(e, ecs::NetId{static_cast<uint32_t>(view.get<ecs::Identity>(e).id)});
-        }
-    }
+    assignSceneNetIds(/*firstLoad=*/true);
 
     ready_ = true;
     return true;
@@ -170,6 +163,64 @@ void GameServer::despawnPlayer(Session &s)
     s.spawned = false;
 }
 
+// Scene bodies replicate under ids the client derives independently, by loading
+// the same scene file in the same order. On the first load that derivation is
+// just Identity.id, so record what we handed out; on a reset we must hand out
+// exactly the same ids again.
+//
+// The ids cannot simply be re-derived after a reset: resetToInitial() destroys
+// and rebuilds the entities, and Identity.id comes from a counter that only ever
+// climbs, so the rebuilt world numbers its objects differently from the file a
+// client loads. Left alone, the rebuilt bodies also arrive here with no NetId at
+// all, and detectAndAnnounceSpawns() -- which runs immediately after the reset in
+// tick() -- would adopt them as script spawns and re-announce the whole scene in
+// the spawn id range. A client that reloaded after that reset then claims the
+// scene ids it derived locally, gets no snapshots for them (they no longer
+// exist), and leaves them rendered but inert, while the spawn replay builds a
+// second, live copy of the same objects beside them.
+//
+// Load order is recovered by sorting on Identity.id: within one load the counter
+// increases monotonically, so ascending id is the order the file was read in --
+// the one thing that is stable across a rebuild.
+void GameServer::assignSceneNetIds(bool firstLoad)
+{
+    std::vector<std::pair<int, ecs::Entity>> bodies;
+    auto view = scene_.registry().view<ecs::Physics, ecs::Identity>();
+    for (auto e : view)
+    {
+        if (view.get<ecs::Physics>(e).mass <= 0.0)
+            continue; // static geometry never moves, so it is never replicated
+        if (scene_.registry().all_of<ecs::NetId>(e))
+            continue; // a spared player keeps the id it already had
+        bodies.emplace_back(view.get<ecs::Identity>(e).id, e);
+    }
+    std::sort(bodies.begin(), bodies.end(),
+              [](const auto &a, const auto &b) { return a.first < b.first; });
+
+    if (firstLoad)
+    {
+        sceneNetIds_.clear();
+        sceneNetIds_.reserve(bodies.size());
+        for (auto &[id, e] : bodies)
+        {
+            const auto netId = static_cast<uint32_t>(id);
+            scene_.registry().emplace<ecs::NetId>(e, ecs::NetId{netId});
+            sceneNetIds_.push_back(netId);
+        }
+        return;
+    }
+
+    // A reset rebuilds the same file, so the counts match. If they ever do not,
+    // assign what we can and leave the rest to be announced as spawns rather
+    // than silently pairing objects with the wrong ids.
+    const size_t n = std::min(bodies.size(), sceneNetIds_.size());
+    for (size_t i = 0; i < n; ++i)
+        scene_.registry().emplace<ecs::NetId>(bodies[i].second, ecs::NetId{sceneNetIds_[i]});
+    if (bodies.size() != sceneNetIds_.size())
+        std::cerr << "reset: scene had " << sceneNetIds_.size() << " replicated bodies, now "
+                  << bodies.size() << "; ids past the overlap will be re-announced\n";
+}
+
 void GameServer::applyPendingReset()
 {
     if (!scene_.consumeResetRequest())
@@ -183,8 +234,17 @@ void GameServer::applyPendingReset()
         if (s.spawned)
             alive.push_back(s.entity);
     scene_.setSparedEntities(alive);
+    // Runtime spawns (cows) really are gone and are still announced; only the
+    // scene's own bodies are exempt, because they come straight back.
+    resettingScene_ = true;
     scene_.resetToInitial();
+    resettingScene_ = false;
     scene_.setSparedEntities({});
+
+    // Before scripts run: a script's on start() may spawn, and those spawns must
+    // fall through to detectAndAnnounceSpawns() as genuine spawns rather than
+    // being mistaken for rebuilt scene objects.
+    assignSceneNetIds(/*firstLoad=*/false);
 
     // Recompile + restart every script, same as the client's reset — the
     // spared players keep their entity/NetId, but their scripts (movement,
@@ -406,12 +466,18 @@ void GameServer::onNetIdDestroyed(ecs::Registry &reg, ecs::Entity e)
 {
     // Fires while the entity is being destroyed; the NetId is still readable.
     // Player entities also carry a NetId, but their removal is announced via
-    // PlayerLeave, so exclude only that range. Base-scene dynamic objects
-    // (netId < kPlayerNetIdBase) are never destroyed outside of a scene
-    // reset, but when that does happen clients need to hear about it same as
-    // a runtime-spawned object going away.
+    // PlayerLeave, so exclude that range.
+    //
+    // Base-scene dynamic objects are announced when a script destroys one, but
+    // NOT when a reset does: the reset rebuilds them under the same netIds
+    // (assignSceneNetIds), so the client's representation stays valid the whole
+    // way through and a despawn would only make it throw away something that is
+    // about to start moving again.
     uint32_t netId = reg.get<ecs::NetId>(e).id;
-    if (netId < net::kPlayerNetIdBase || netId >= net::kSpawnNetIdBase)
+    const bool sceneBody = netId < net::kPlayerNetIdBase;
+    if (sceneBody && resettingScene_)
+        return;
+    if (sceneBody || netId >= net::kSpawnNetIdBase)
         pendingDespawns_.push_back(netId);
 }
 

@@ -204,16 +204,50 @@ fn store_bundle(st: &Shared, up: &BundleUpload) -> ApiResult<(String, usize)> {
     Ok((sha, size))
 }
 
+/// Gate on creating a *new* game.
+///
+/// Two independent secrets are in play and it is worth keeping them straight:
+/// this one (X-Cow-Publish-Key) says whether you may publish at all, and is
+/// shared between everyone you have invited; the per-game edit key returned by a
+/// publish says who may later change that particular game, and is unique to it.
+///
+/// With COW_PUBLISH_TOKENS set, the catalog stays publicly readable but the
+/// write path is closed to anyone without a key -- so a public server does not
+/// mean strangers get to run scripts on the box.
+fn require_publish_key(st: &Shared, headers: &HeaderMap) -> ApiResult<()> {
+    if st.cfg.publish_tokens.is_empty() {
+        // No allow-list configured: fall back to the coarse open/closed switch.
+        if !st.cfg.publish_open {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "publishing is currently closed",
+            ));
+        }
+        return Ok(());
+    }
+    let presented = headers
+        .get("x-cow-publish-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    // Compare digests rather than the raw strings: equality on the secrets
+    // themselves returns as soon as two bytes differ, which leaks a prefix to
+    // anyone willing to time it.
+    let presented = hash_key(presented);
+    if st.cfg.publish_tokens.iter().any(|t| hash_key(t) == presented) {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        StatusCode::FORBIDDEN,
+        "publishing needs a valid publish key",
+    ))
+}
+
 pub async fn publish(
     State(st): State<Shared>,
+    headers: HeaderMap,
     Json(up): Json<BundleUpload>,
 ) -> ApiResult<Json<PublishResponse>> {
-    if !st.cfg.publish_open {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "publishing is currently invite-only",
-        ));
-    }
+    require_publish_key(&st, &headers)?;
     let (sha, size) = store_bundle(&st, &up)?;
 
     let title = clean_title(&up.title);
