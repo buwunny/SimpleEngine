@@ -6,6 +6,7 @@
 #include <emscripten/html5.h>
 #include <cstring>
 #include <cctype>
+#include <string>
 
 static float getDevicePixelRatio()
 {
@@ -240,6 +241,42 @@ static void cow_set_clipboard_text(ImGuiContext *ctx, const char *text)
         cow_clipboard_write(text);
 }
 
+// Cache of the last-known system clipboard contents. ImGui's
+// Platform_GetClipboardTextFn must return a pointer synchronously (it's
+// called mid-frame when handling Ctrl+V), but navigator.clipboard.readText()
+// is a permission-gated promise that can't be blocked on. So we hand back
+// whatever we fetched last time and kick off a fresh async read for next
+// time -- the first Ctrl+V after the page loads (or after clipboard
+// contents change externally) may be stale, with the real text landing on
+// the following read.
+static std::string s_clipboardBuffer;
+
+extern "C" EMSCRIPTEN_KEEPALIVE void cow_clipboard_on_read(const char *text)
+{
+    s_clipboardBuffer = text ? text : "";
+}
+
+EM_JS(void, cow_clipboard_request_read, (), {
+    try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then(function(text) {
+                var len = lengthBytesUTF8(text) + 1;
+                var buf = _malloc(len);
+                stringToUTF8(text, buf, len);
+                _cow_clipboard_on_read(buf);
+                _free(buf);
+            })['catch'](function(e) { });
+        }
+    } catch (e) { }
+});
+
+static const char *cow_get_clipboard_text(ImGuiContext *ctx)
+{
+    (void)ctx;
+    cow_clipboard_request_read();
+    return s_clipboardBuffer.c_str();
+}
+
 void ImGui_ImplEmscripten_Init()
 {
     ImGuiIO &io = ImGui::GetIO();
@@ -248,6 +285,7 @@ void ImGui_ImplEmscripten_Init()
     ImGuiPlatformIO &platformIo = ImGui::GetPlatformIO();
     s_prevSetClipboardTextFn = platformIo.Platform_SetClipboardTextFn;
     platformIo.Platform_SetClipboardTextFn = cow_set_clipboard_text;
+    platformIo.Platform_GetClipboardTextFn = cow_get_clipboard_text;
     emscripten_set_mousemove_callback("#canvas", NULL, EM_TRUE, mouse_callback);
     emscripten_set_mousedown_callback("#canvas", NULL, EM_TRUE, mousedown_callback);
     emscripten_set_mouseup_callback("#canvas", NULL, EM_TRUE, mouseup_callback);
