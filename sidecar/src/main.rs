@@ -152,6 +152,15 @@ impl RoomResolver {
                     }
                 };
                 if !resp.status().is_success() {
+                    // Say so. This turns into a bare 403 at the browser, and an
+                    // unexplained 403 during a WebSocket handshake is one of the
+                    // hardest things to chase from the client side -- the room
+                    // may simply have been reaped, or the control plane may have
+                    // restarted and forgotten it.
+                    eprintln!(
+                        "room lookup {token} rejected by control: HTTP {}",
+                        resp.status()
+                    );
                     return None;
                 }
                 let lookup: RoomLookup = resp.json().await.ok()?;

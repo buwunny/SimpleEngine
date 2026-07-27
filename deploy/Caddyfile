@@ -22,7 +22,22 @@
     # the one that matches what the client asked for.
     @net path /net /net/*
     handle @net {
-        reverse_proxy sidecar:8080
+        # https://, because the sidecar terminates TLS on this port itself:
+        # docker-compose.prod.yml hands it COW_TLS_CERT/COW_TLS_KEY (it needs
+        # them for the WebTransport listener on :4443, which is exposed
+        # directly), and its WS listener turns on TLS whenever those are set.
+        # Proxying to it in plaintext is a handshake failure, i.e. a 502.
+        #
+        # Verification is skipped rather than pinned: this hop never leaves the
+        # private `cownet` bridge, and Caddy dials the compose service name
+        # `sidecar`, which no certificate issued for the public domain can
+        # match. Pinning tls_server_name to the domain would work but bakes it
+        # into an otherwise domain-agnostic file.
+        reverse_proxy https://sidecar:8080 {
+            transport http {
+                tls_insecure_skip_verify
+            }
+        }
     }
 
     handle {
