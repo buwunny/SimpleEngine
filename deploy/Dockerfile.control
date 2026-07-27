@@ -36,7 +36,19 @@ WORKDIR /src/control
 RUN cargo build --release
 
 # ---- runtime stage --------------------------------------------------------
-FROM debian:bookworm-slim AS runtime
+# MUST match the distro the room server is compiled on (server-build, above).
+# CowEngineServer links the host glibc/libstdc++, and glibc is only backward
+# compatible: a binary built against ubuntu 24.04 (glibc 2.39, GLIBCXX_3.4.32)
+# will not start on bookworm (glibc 2.36, GLIBCXX_3.4.30). That mismatch is
+# invisible until a *join* tries to spawn a room -- the control plane itself
+# starts fine, serves the catalog, and only the world fails, with
+# "version `GLIBC_2.38' not found".
+#
+# The Rust control binary is built on bookworm and runs here unchanged: an
+# older glibc target on a newer runtime is the direction that does work.
+# deploy/Dockerfile.server pairs ubuntu 24.04 with ubuntu 24.04 for the same
+# reason -- keep all three in step.
+FROM ubuntu:24.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
