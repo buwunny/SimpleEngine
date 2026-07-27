@@ -12,7 +12,16 @@
         reverse_proxy control:8080
     }
 
-    handle_path /net/* {
+    # Both matchers are needed: `/net/*` does NOT match a bare `/net`, and a
+    # bare `/net` is exactly what clients connect to -- COW_PUBLIC_WS is
+    # `wss://host/net`, with the room carried in the query string. With only
+    # the wildcard, every real connection fell through to the 404 below.
+    #
+    # No handle_path here: the sidecar reads only the query string, never the
+    # path, so stripping the prefix buys nothing and the un-stripped form is
+    # the one that matches what the client asked for.
+    @net path /net /net/*
+    handle @net {
         reverse_proxy sidecar:8080
     }
 
