@@ -265,6 +265,7 @@ In **Settings → Secrets and variables → Actions → Variables**, add:
 | --- | --- | --- |
 | `COWENGINE_SERVER_WS` | `wss://game.cowengine.com` | Baked into `/play` as the server. **Required for multiplayer.** |
 | `COWENGINE_SERVER_WT` | `https://game.cowengine.com:4443` | Optional WebTransport URL (primary; WS is the fallback). |
+| `COWENGINE_API` | `https://game.cowengine.com` | Control-plane base, baked into `/`, `/play` and `/edit`. Without it the game browser, the projects dialog and Build → Publish are all disabled. Defaults to the host of `COWENGINE_SERVER_WS`. |
 | `PAGES_CNAME` | `cowengine.com` | Optional custom domain (writes `site/CNAME`). |
 
 In **Settings → Pages**: set **Source = GitHub Actions**, and (if using a custom
@@ -279,6 +280,28 @@ Result:
 
 If `COWENGINE_SERVER_WS` is unset, `/play` is published single-player; players can
 still opt in with `?ws=wss://host` / `?wt=https://host:4443` query params.
+
+### Projects and project keys
+
+**Editor** on the landing page opens a projects dialog rather than going
+straight to `/edit/`. From there you can start a new project, reopen one this
+browser has published before, or open any project by pasting its **project
+key**:
+
+```
+<project id>.<edit key>       e.g. moon-ranch-a1b2c3.9f3c…7ab1
+```
+
+The id is the one the server assigned on publish; the edit key is the secret it
+showed exactly once, in the editor's publish dialog. Together they let an author
+carry a project to another browser or machine — the dialog downloads the current
+bundle into the editor and files the key away so Build → Publish updates that
+project instead of creating a new one. `?project=<project key>` on the landing
+page is the same thing as a link.
+
+Pasting only the id (no edit key) opens the project as a **copy**: it loads, but
+publishing creates a new project, because updates need the key. There is no
+recovery path for a lost edit key — the server stores only its hash.
 
 ---
 

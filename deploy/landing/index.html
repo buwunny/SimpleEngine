@@ -517,6 +517,183 @@
     footer .links a:hover { text-decoration: underline; }
     footer .tiny { color: #d0b6e8; font-size: 11px; }
 
+    /* --------------------------------------------------- projects dialog */
+    /* A modal, so unlike the page's windows it has no taskbar button and no
+       drag -- Windows 95 dialogs behaved the same way. The chrome is the
+       page's own .window/.titlebar, and the project grid is the same shape as
+       the game browser in the play page's lobby: choosing a project to edit
+       and choosing a world to play are the same gesture. */
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 960;
+      display: flex;
+      justify-content: center;
+      padding: 24px 14px calc(var(--taskbar-h) + 24px);
+      overflow: auto;
+      background: rgba(8, 1, 15, .62);
+    }
+    .modal .window { width: min(720px, 100%); margin: auto; }
+
+    #projects h1 { margin: 0 0 6px; font-size: clamp(1.6rem, 5vw, 2.2rem); }
+    #projects .sub { margin: 0 0 12px; text-align: left; }
+
+    .field { margin: 0 0 12px; }
+    .field > label {
+      display: block;
+      margin: 0 0 5px;
+      font: 700 11px/1.4 var(--ui);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #3a1d55;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    /* Sunken field, raised button — the two halves of the 95 bevel. */
+    .row input {
+      flex: 1 1 240px;
+      min-width: 150px;
+      padding: 6px 8px;
+      border: 0;
+      background: var(--light);
+      color: var(--ink);
+      font: 13px/1.4 var(--ui);
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+    .row input:focus-visible { outline: 1px dotted var(--ink); outline-offset: -4px; }
+
+    .push {
+      padding: 6px 14px;
+      border: 0;
+      cursor: pointer;
+      background: var(--face);
+      color: var(--ink);
+      font: 700 13px/1 var(--ui);
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf;
+    }
+    .push:active:not([disabled]) {
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+    .push[disabled] {
+      cursor: default;
+      color: var(--shadow);
+      text-shadow: 1px 1px 0 var(--light);
+    }
+    .push.small { padding: 4px 10px; font-size: 12px; }
+
+    /* Status reads as a terminal line, like the spec block above. */
+    .status {
+      margin: 12px 0 0;
+      padding: 7px 10px;
+      font: 13px/1.5 var(--mono);
+      color: var(--mint);
+      background: #000;
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+    .status.error { color: #ff6b6b; }
+    .status.busy::after { content: " _"; animation: blink 1.1s steps(1) infinite; }
+
+    .proj-list {
+      display: grid;
+      /* auto-fill, not auto-fit: most people have one or two projects, and a
+         single card stretched across the whole dialog reads as a mistake. */
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+    /* Each project is its own little window, mirroring the lobby's world
+       cards and the PLAY.EXE / EDITOR.EXE cards above. */
+    .proj-card {
+      display: flex;
+      flex-direction: column;
+      padding: 3px;
+      background: var(--face);
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf,
+        6px 6px 0 rgba(0,0,0,.45);
+      transition: box-shadow .1s steps(2);
+    }
+    .proj-card:hover, .proj-card:focus-within {
+      box-shadow:
+        inset -1px -1px 0 var(--dark),
+        inset  1px  1px 0 var(--light),
+        inset -2px -2px 0 var(--shadow),
+        inset  2px  2px 0 #dfdfdf,
+        9px 9px 0 var(--cyan);
+    }
+    .proj-card .card-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 5px;
+      background: linear-gradient(90deg, var(--title-a), var(--title-b));
+      color: #fff;
+      font: 700 12px/1.3 var(--ui);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .proj-card .card-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+      padding: 12px;
+    }
+    .proj-card h3 {
+      margin: 0;
+      font-size: 1.05rem;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      word-break: break-word;
+    }
+    .proj-card .stat {
+      display: inline-block;
+      margin: 0 6px 0 0;
+      padding: 1px 5px;
+      font: 700 11px/1.5 var(--mono);
+      color: var(--mint);
+      background: #000;
+    }
+    .proj-card .id {
+      font: 11px/1.5 var(--mono);
+      color: #26262e;
+      word-break: break-all;
+    }
+    .proj-card .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+
+    .proj-empty {
+      grid-column: 1 / -1;
+      padding: 10px 12px;
+      font: 13px/1.6 var(--mono);
+      color: var(--yellow);
+      background: #000;
+      box-shadow:
+        inset  1px  1px 0 var(--dark),
+        inset -1px -1px 0 var(--light),
+        inset  2px  2px 0 var(--shadow),
+        inset -2px -2px 0 #dfdfdf;
+    }
+
     /* ------------------------------------------------------------ taskbar */
     .taskbar {
       position: fixed;
@@ -793,6 +970,44 @@
     </p>
   </footer>
 
+  <div class="modal" id="projects" hidden>
+    <div class="window" role="dialog" aria-modal="true" aria-labelledby="projTitle">
+      <div class="titlebar">
+        <span aria-hidden="true">📁</span>
+        <span class="name" id="projTitle">C:\COWENGINE\PROJECTS.EXE</span>
+        <span class="tb-btns">
+          <button class="tb-btn" type="button" id="projClose" aria-label="Close Projects">✕</button>
+        </span>
+      </div>
+      <div class="win-body">
+        <h1>Projects</h1>
+        <p class="sub">Start something new, or open a published project with its key.</p>
+        <hr class="rule" />
+
+        <div class="field">
+          <label for="projNewTitle">New project</label>
+          <div class="row">
+            <input id="projNewTitle" type="text" placeholder="Project name" maxlength="60"
+                   autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <button class="push" type="button" id="projNew">📄 New project</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="projKeyInput">Open with a project key</label>
+          <div class="row">
+            <input id="projKeyInput" type="text" placeholder="my-game-a1b2c3.a94f...e01"
+                   autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <button class="push" type="button" id="projOpen">📂 Open</button>
+          </div>
+        </div>
+
+        <div id="projStatus" class="status">Ready.</div>
+        <div id="projList" class="proj-list"></div>
+      </div>
+    </div>
+  </div>
+
   <nav id="startmenu" aria-label="Start menu">
     <div class="spine" aria-hidden="true">CowEngine 95</div>
     <ul>
@@ -811,6 +1026,11 @@
   </div>
 
   <script>
+    // Control-plane base URL, baked by Pages at deploy time (the same marker
+    // the /play and /edit shells carry), or overridden with ?api= for local
+    // testing. Empty = no catalog, so projects can only be created, not opened.
+    var __COWENGINE_API__ = null;
+
     // --- visitor counter, in the finest tradition of the hit counter GIF ----
     (function () {
       var el = document.getElementById("hits");
@@ -1006,6 +1226,373 @@
           });
         });
       }
+    })();
+
+    // --- projects: create one, or open one by project key -------------------
+    //
+    // The editor is a wasm app on the same origin (/edit/), and it boots out of
+    // localStorage: 'cowengine_save' holds the scene, 'cowengine_scripts' and
+    // 'cowengine_models' are {path: contents} maps restored into its virtual
+    // filesystem, and 'cowengine_publish_keys' is the publish state it consults
+    // to decide whether Build > Publish creates a game or updates an existing
+    // one. Opening a project is therefore just writing those keys and then
+    // navigating -- no editor round trip, and no new endpoint on the server.
+    //
+    // A "project key" is the pair the server hands out on publish, written as
+    // one string: "<game id>.<edit key>". The id alone is enough to download a
+    // project; the edit key is what makes the copy in the editor the *same*
+    // project rather than a fork of it.
+    (function () {
+      var STORE_KEY = 'cowengine_publish_keys';
+      var SCENE_KEY = 'cowengine_save';
+      var SCRIPTS_KEY = 'cowengine_scripts';
+      var MODELS_KEY = 'cowengine_models';
+
+      var dialog = document.getElementById("projects");
+      var statusEl = document.getElementById("projStatus");
+      var listEl = document.getElementById("projList");
+      var keyInput = document.getElementById("projKeyInput");
+      var newInput = document.getElementById("projNewTitle");
+      var openBtn = document.getElementById("projOpen");
+      if (!dialog) return;
+
+      function apiBase() {
+        var fromQuery = "";
+        try { fromQuery = new URLSearchParams(location.search).get("api") || ""; } catch (e) { }
+        var base = fromQuery || (typeof __COWENGINE_API__ === "string" ? __COWENGINE_API__ : "");
+        return base.replace(/\/+$/, "");
+      }
+      var API = apiBase();
+
+      // ---- localStorage plumbing (shared with the editor) ------------------
+      function readStore() {
+        var raw = "";
+        try { raw = localStorage.getItem(STORE_KEY) || ""; } catch (e) { return {}; }
+        if (!raw) return {};
+        try {
+          var j = JSON.parse(raw);
+          return (j && typeof j === "object" && !Array.isArray(j)) ? j : {};
+        } catch (e) { return {}; }
+      }
+
+      function writeStore(store) {
+        try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); }
+        catch (e) { throw new Error("This browser will not let the page store the project key."); }
+      }
+
+      function clearScene() {
+        try {
+          localStorage.removeItem(SCENE_KEY);
+          localStorage.removeItem(SCRIPTS_KEY);
+          localStorage.removeItem(MODELS_KEY);
+        } catch (e) { }
+      }
+
+      // All three keys or none: an editor that boots a scene whose scripts and
+      // models never made it is worse than one that boots the default scene.
+      function seedScene(bundle) {
+        try {
+          localStorage.setItem(SCENE_KEY, String(bundle.scene || ""));
+          localStorage.setItem(SCRIPTS_KEY, JSON.stringify(bundle.scripts || {}));
+          localStorage.setItem(MODELS_KEY, JSON.stringify(bundle.models || {}));
+        } catch (e) {
+          clearScene();
+          throw new Error("Could not stage this project — browser storage is full or blocked.");
+        }
+      }
+
+      // 'last' is the project Publish will update; 'keys' and 'titles' are the
+      // per-project edit key and name. Without an edit key we deliberately
+      // leave 'last' empty: the download opens as a copy, and publishing it
+      // creates a new project instead of failing against one we cannot update.
+      function rememberProject(id, key, title) {
+        var store = readStore();
+        if (!store.keys || typeof store.keys !== "object") store.keys = {};
+        if (!store.titles || typeof store.titles !== "object") store.titles = {};
+        if (key) store.keys[id] = key;
+        if (title) store.titles[id] = title;
+        store.last = key ? id : "";
+        store.pending_title = key ? "" : (title || "");
+        writeStore(store);
+      }
+
+      function recentProjects() {
+        var store = readStore();
+        var keys = (store.keys && typeof store.keys === "object") ? store.keys : {};
+        var titles = (store.titles && typeof store.titles === "object") ? store.titles : {};
+        var last = typeof store.last === "string" ? store.last : "";
+        return Object.keys(keys)
+          .filter(function (id) { return typeof keys[id] === "string" && keys[id]; })
+          .sort(function (a, b) {
+            if (a === last) return -1;
+            if (b === last) return 1;
+            return a < b ? -1 : (a > b ? 1 : 0);
+          })
+          .map(function (id) {
+            return {
+              id: id,
+              key: keys[id],
+              title: typeof titles[id] === "string" ? titles[id] : "",
+              current: id === last
+            };
+          });
+      }
+
+      // ---- status line -------------------------------------------------------
+      function say(text, kind) {
+        statusEl.textContent = text;
+        // Classes rather than inline colour, so the terminal look in the
+        // stylesheet stays in charge.
+        statusEl.classList.toggle("error", kind === "error");
+        statusEl.classList.toggle("busy", kind === "busy");
+      }
+
+      // ---- project keys ------------------------------------------------------
+      // Ids are slug-plus-suffix and never contain a dot, so the first
+      // separator splits the pair. A bare id is accepted and opens a copy.
+      function parseProjectKey(text) {
+        var raw = String(text || "").trim();
+        var m = raw.match(/^([a-zA-Z0-9][a-zA-Z0-9_-]*)(?:[.:\s]+([0-9a-fA-F]{16,}))?$/);
+        return m ? { id: m[1], key: m[2] || "" } : null;
+      }
+
+      function projectKeyText(project) {
+        return project.key ? project.id + "." + project.key : project.id;
+      }
+
+      // ---- the two actions ---------------------------------------------------
+      function newProject() {
+        var title = (newInput.value || "").trim().slice(0, 60);
+        clearScene();
+        try {
+          var store = readStore();
+          store.last = "";
+          store.pending_title = title;
+          writeStore(store);
+        } catch (e) {
+          say(String(e.message || e), "error");
+          return;
+        }
+        say("Starting " + (title || "a new project") + "...", "busy");
+        location.href = "edit/";
+      }
+
+      async function fetchJson(url, notFound) {
+        var resp = await fetch(url, { headers: { Accept: "application/json" } });
+        if (resp.status === 404 && notFound) throw new Error(notFound);
+        if (!resp.ok) throw new Error("Server said HTTP " + resp.status + ".");
+        return await resp.json();
+      }
+
+      async function openProject(id, key) {
+        if (!API) {
+          say("No CowEngine server is configured for this page, so published projects cannot be opened here.", "error");
+          return;
+        }
+        say("Looking up " + id + "...", "busy");
+        try {
+          var meta = await fetchJson(
+            API + "/api/games/" + encodeURIComponent(id),
+            'No project called "' + id + '" on this server. Check the key and try again.');
+          var game = (meta && meta.game) || {};
+          var title = game.title || id;
+
+          say('Downloading "' + title + '"...', "busy");
+          var bundle = await fetchJson(API + "/api/games/" + encodeURIComponent(id) + "/bundle");
+          if (!bundle || typeof bundle.scene !== "string")
+            throw new Error("The server sent a project this page did not understand.");
+
+          seedScene(bundle);
+          rememberProject(id, key, title);
+          say('Opening "' + title + '" in the editor...', "busy");
+          location.href = "edit/";
+        } catch (e) {
+          say(String((e && e.message) || e), "error");
+        }
+      }
+
+      function openFromInput() {
+        var parsed = parseProjectKey(keyInput.value);
+        if (!parsed) {
+          say("That does not look like a project key. Paste the whole thing: <project id>.<edit key>", "error");
+          keyInput.focus();
+          return;
+        }
+        if (!parsed.key)
+          say("No edit key in that — opening " + parsed.id + " as a copy.", "busy");
+        openProject(parsed.id, parsed.key);
+      }
+
+      // ---- the project grid --------------------------------------------------
+      function makeButton(label, className, onClick) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = className;
+        b.textContent = label;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+
+      function renderProjects(projects) {
+        listEl.innerHTML = "";
+        if (!projects.length) {
+          var empty = document.createElement("div");
+          empty.className = "proj-empty";
+          empty.textContent = "No projects saved in this browser yet. Publishing one from the editor puts it here.";
+          listEl.appendChild(empty);
+          return;
+        }
+
+        projects.forEach(function (project) {
+          var name = project.title || project.id;
+
+          var card = document.createElement("div");
+          card.className = "proj-card";
+
+          var bar = document.createElement("div");
+          bar.className = "card-title";
+          // textContent throughout: titles come from whoever published them and
+          // are never parsed as markup.
+          bar.textContent = name.toUpperCase().slice(0, 22) + ".COW";
+
+          var body = document.createElement("div");
+          body.className = "card-body";
+
+          var h3 = document.createElement("h3");
+          h3.textContent = name;
+
+          var stats = document.createElement("div");
+          if (project.current) {
+            var cur = document.createElement("span");
+            cur.className = "stat";
+            cur.textContent = "open in editor";
+            stats.appendChild(cur);
+          }
+          if (typeof project.version === "number") {
+            var ver = document.createElement("span");
+            ver.className = "stat";
+            ver.textContent = "v" + project.version;
+            stats.appendChild(ver);
+          }
+
+          var idLine = document.createElement("div");
+          idLine.className = "id";
+          idLine.textContent = project.id;
+
+          var actions = document.createElement("div");
+          actions.className = "actions";
+          actions.appendChild(makeButton("📂 Open", "push small", function () {
+            openProject(project.id, project.key);
+          }));
+          actions.appendChild(makeButton("🔑 Copy key", "push small", function () {
+            var text = projectKeyText(project);
+            var done = function () { say("Project key for " + project.id + " copied to the clipboard."); };
+            if (navigator.clipboard && navigator.clipboard.writeText)
+              navigator.clipboard.writeText(text).then(done, function () { say(text); });
+            else
+              say(text);
+          }));
+          actions.appendChild(makeButton("🗑 Forget", "push small", function () {
+            // The edit key is unrecoverable: the server only ever showed it
+            // once, so this browser's copy may be the only one left.
+            if (!window.confirm("Forget " + project.id + " on this computer?\n\nIts edit key is stored nowhere else — without a copy of the project key you will not be able to update this project again."))
+              return;
+            var store = readStore();
+            if (store.keys) delete store.keys[project.id];
+            if (store.titles) delete store.titles[project.id];
+            if (store.last === project.id) store.last = "";
+            try { writeStore(store); } catch (e) { }
+            renderProjects(recentProjects());
+            say("Forgot " + project.id + ".");
+          }));
+
+          body.appendChild(h3);
+          if (stats.childNodes.length) body.appendChild(stats);
+          body.appendChild(idLine);
+          body.appendChild(actions);
+          card.appendChild(bar);
+          card.appendChild(body);
+          listEl.appendChild(card);
+        });
+      }
+
+      // Titles and versions drift as a project is republished (possibly from
+      // another browser), so the stored copy is only a starting point.
+      function refreshProjects(projects) {
+        if (!API || !projects.length) return;
+        Promise.all(projects.map(function (project) {
+          return fetchJson(API + "/api/games/" + encodeURIComponent(project.id))
+            .then(function (meta) {
+              var game = (meta && meta.game) || {};
+              if (game.title) project.title = game.title;
+              if (typeof game.version === "number") project.version = game.version;
+            })
+            .catch(function () { /* offline, or the project is gone: keep what we have */ });
+        })).then(function () {
+          var store = readStore();
+          if (!store.titles || typeof store.titles !== "object") store.titles = {};
+          projects.forEach(function (p) { if (p.title) store.titles[p.id] = p.title; });
+          try { writeStore(store); } catch (e) { }
+          renderProjects(projects);
+        });
+      }
+
+      // ---- open / close ------------------------------------------------------
+      function openDialog() {
+        dialog.hidden = false;
+        var projects = recentProjects();
+        renderProjects(projects);
+        refreshProjects(projects);
+        if (!API)
+          say("This page has no CowEngine server configured — you can start a new project, but published ones cannot be opened.", "error");
+        else
+          say(projects.length ? "Pick a project, or paste a key to open one from another browser."
+                              : "Start a new project, or paste a project key to open one.");
+        (keyInput.value ? openBtn : newInput).focus();
+      }
+
+      function closeDialog() {
+        dialog.hidden = true;
+      }
+
+      // Every route into the editor goes through here, so a project is always
+      // chosen deliberately. The links keep their hrefs, so opening one in a new
+      // tab (or with JavaScript off) still lands in the editor.
+      [].slice.call(document.querySelectorAll('a[href="edit/"]')).forEach(function (link) {
+        link.addEventListener("click", function (e) {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          e.preventDefault();
+          var menu = document.getElementById("startmenu");
+          if (menu) menu.classList.remove("open");
+          openDialog();
+        });
+      });
+
+      document.getElementById("projClose").addEventListener("click", closeDialog);
+      dialog.addEventListener("click", function (e) {
+        if (e.target === dialog) closeDialog();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !dialog.hidden) closeDialog();
+      });
+
+      openBtn.addEventListener("click", openFromInput);
+      keyInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); openFromInput(); }
+      });
+      document.getElementById("projNew").addEventListener("click", newProject);
+      newInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); newProject(); }
+      });
+
+      // ?project=<key> makes a project key a shareable link into the editor.
+      try {
+        var wanted = new URLSearchParams(location.search).get("project");
+        if (wanted) {
+          keyInput.value = wanted;
+          openDialog();
+        }
+      } catch (e) { }
     })();
 
     // --- sparkle cursor trail (skipped on touch / reduced motion) -----------

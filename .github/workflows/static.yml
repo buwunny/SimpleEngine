@@ -46,8 +46,9 @@ jobs:
       - name: Assemble site (landing at /, game at /play, editor at /edit)
         env:
           # Set repository variable COWENGINE_API to the control-plane base,
-          # e.g. https://game.cowengine.com. /play uses it for the lobby and
-          # /edit uses it to enable Build > Publish.
+          # e.g. https://game.cowengine.com. /play uses it for the lobby, the
+          # landing page uses it to open projects by key, and /edit uses it to
+          # enable Build > Publish.
           COWENGINE_API: ${{ vars.COWENGINE_API }}
           # Set repository variable COWENGINE_SERVER_WS to bake the multiplayer
           # server into the published game, e.g. wss://game.cowengine.com/net
@@ -105,7 +106,7 @@ jobs:
             api = derive_api_from_transport(ws) or derive_api_from_transport(wt)
 
           if api:
-            for path in ["site/play/index.html", "site/edit/index.html"]:
+            for path in ["site/index.html", "site/play/index.html", "site/edit/index.html"]:
               with open(path, encoding="utf-8") as f:
                 html = f.read()
               marker = "var __COWENGINE_API__ = null;"
@@ -115,9 +116,9 @@ jobs:
               html = html.replace(marker, f"var __COWENGINE_API__ = '{api}';")
               with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
-            print(f"Baked control API into /play and /edit: {api}")
+            print(f"Baked control API into /, /play and /edit: {api}")
           else:
-            print("No COWENGINE_API set — /play lobby stays disabled and /edit publish stays unavailable.")
+            print("No COWENGINE_API set — /play lobby stays disabled, the landing page cannot open projects by key, and /edit publish stays unavailable.")
 
           if ws or wt:
             fields = []

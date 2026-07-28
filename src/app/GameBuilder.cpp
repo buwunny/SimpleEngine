@@ -828,14 +828,27 @@ namespace
                                                               : std::string();
     }
 
-    void rememberPublish(const std::string &gameId, const std::string &editKey)
+    // The title of the in-flight publish, so the completion handler can file it
+    // under the game id the server assigns — which is only known once the reply
+    // arrives, and (on the web) several frames after the title was read.
+    std::string g_publishTitle;
+
+    void rememberPublish(const std::string &gameId, const std::string &editKey,
+                         const std::string &title)
     {
         nlohmann::json store = loadPublishStore();
         if (!store.contains("keys") || !store["keys"].is_object())
             store["keys"] = nlohmann::json::object();
+        if (!store.contains("titles") || !store["titles"].is_object())
+            store["titles"] = nlohmann::json::object();
         if (!editKey.empty())
             store["keys"][gameId] = editKey;
+        if (!title.empty())
+            store["titles"][gameId] = title;
         store["last"] = gameId;
+        // The name a not-yet-published project was started with; it has a game
+        // id now, so the entry above supersedes it.
+        store["pending_title"] = "";
         savePublishStore(store);
     }
 
@@ -884,7 +897,7 @@ namespace
         g_publish.gameId = j["id"].get<std::string>();
         g_publish.version = j.value("version", 0);
         g_publish.editKey = j.value("edit_key", std::string());
-        rememberPublish(g_publish.gameId, g_publish.editKey);
+        rememberPublish(g_publish.gameId, g_publish.editKey, g_publishTitle);
         g_publish.message = "Published " + g_publish.gameId + " (version " +
                             std::to_string(g_publish.version) + ")";
     }
@@ -918,6 +931,23 @@ std::string GameBuilder::lastPublishedId()
 std::string GameBuilder::publishKey()
 {
     return savedPublishKey();
+}
+
+std::string GameBuilder::projectTitle()
+{
+    nlohmann::json store = loadPublishStore();
+    const std::string last = lastPublishedId();
+    if (!last.empty() && store.contains("titles") && store["titles"].is_object())
+    {
+        auto it = store["titles"].find(last);
+        if (it != store["titles"].end() && it->is_string())
+            return it->get<std::string>();
+    }
+    // Nothing published yet: fall back to the name the project was started
+    // with, which the landing page leaves here when it opens the editor.
+    auto pending = store.find("pending_title");
+    return (pending != store.end() && pending->is_string()) ? pending->get<std::string>()
+                                                            : std::string();
 }
 
 std::string GameBuilder::buildBundleJson(Scene *scene, const std::string &title,
@@ -980,6 +1010,7 @@ bool GameBuilder::publishStart(Scene *scene, const std::string &title,
     // Remember the invite key so it is typed once, not once per publish. An
     // empty one is stored too — that is how you clear a key you no longer want.
     rememberPublishKey(publishKey);
+    g_publishTitle = title;
 
     // Update the existing game when we still hold its key; otherwise create one.
     const std::string previous = lastPublishedId();

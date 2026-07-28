@@ -301,7 +301,13 @@ void EditorUI::drawPublishModal()
         ImGui::OpenPopup("Publish to CowEngine");
         publishModalJustOpened = false;
         if (publishTitle[0] == '\0')
-            std::snprintf(publishTitle, sizeof(publishTitle), "My CowEngine Game");
+        {
+            // The project's own name, so publishing an update keeps it rather
+            // than renaming the game to whatever this field defaulted to.
+            const std::string project = GameBuilder::projectTitle();
+            std::snprintf(publishTitle, sizeof(publishTitle), "%s",
+                          project.empty() ? "My CowEngine Game" : project.c_str());
+        }
         // Prefill from the last publish so a returning author never retypes it.
         if (publishKey[0] == '\0')
         {

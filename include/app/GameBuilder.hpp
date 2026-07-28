@@ -104,6 +104,12 @@ public:
     // The game id this editor last published, or empty. Drives "update" vs
     // "publish new" in the UI.
     static std::string lastPublishedId();
+
+    // Name of the project currently open, for prefilling the publish title.
+    // Remembered per game id from the last publish, and also written by the
+    // landing page when it opens a project by key — without it, publishing an
+    // update would silently rename the game to the field's default.
+    static std::string projectTitle();
 };
 
 #endif // GAME_BUILDER_HPP
