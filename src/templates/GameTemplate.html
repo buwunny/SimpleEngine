@@ -741,8 +741,16 @@
         function redirectToGame(join, name, key) {
             var url = new URL(location.href);
             url.searchParams.set('room', join.room);
-            if (join.ws) url.searchParams.set('ws', join.ws);
-            if (join.wt) url.searchParams.set('wt', join.wt);
+            // The join response's ws/wt normally match what GameBuilder already
+            // baked into __COWENGINE_SERVER__ (both come from the same deploy's
+            // COW_PUBLIC_WS/WT), so most links can omit them and just carry the
+            // room. Only add them when they actually differ, e.g. a bundle
+            // exported without a baked server, or a differently-configured one.
+            var baked = __COWENGINE_SERVER__ || {};
+            if (join.ws && normalizeTransportUrl(join.ws) !== normalizeTransportUrl(baked.ws))
+                url.searchParams.set('ws', join.ws);
+            if (join.wt && normalizeTransportUrl(join.wt) !== normalizeTransportUrl(baked.wt))
+                url.searchParams.set('wt', join.wt);
             if (join.cert_hash) url.searchParams.set('certhash', join.cert_hash);
             if (key) url.searchParams.set('key', key);
             if (name) url.searchParams.set('name', name);
@@ -849,9 +857,9 @@
             if (!hasServer)
                 return;
             var params = new URLSearchParams(location.search);
-            // Already resolved (redirected here with a choice) or a developer
-            // override (?wt=/?ws=) is present: skip the gate.
-            if (params.has('key') || params.has('singleplayer') || params.has('wt') || params.has('ws'))
+            // Already resolved (redirected here with a room, or a choice) or a
+            // developer override (?wt=/?ws=) is present: skip the gate.
+            if (params.has('room') || params.has('key') || params.has('singleplayer') || params.has('wt') || params.has('ws'))
                 return;
 
             var gate = document.getElementById('gateOverlay');
